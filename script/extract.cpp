@@ -325,9 +325,9 @@ inline std::string char_context(const std::vector<CharInfo>& chars,
         return t;
     };
     std::string before;
-    for (size_t i = (idx >= 6 ? idx - 6 : 0); i < idx; ++i) before += cp_text(chars[i].ucs);
+    for (size_t i = (idx >= 7 ? idx - 7 : 0); i < idx; ++i) before += cp_text(chars[i].ucs);
     std::string after;
-    for (size_t i = idx; i < chars.size() && i < idx + 6; ++i) after += cp_text(chars[i].ucs);
+    for (size_t i = idx + 1; i < chars.size() && i < idx + 7; ++i) after += cp_text(chars[i].ucs);
     return "[" + before + "|" + cur.latex + "|?" + after + "]";
 }
 
@@ -826,7 +826,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                             txt += x.latex;
                             if (x.is_math_symbol) saw_math_symbol = true;
                         } else if (x.ucs == 0 || x.ucs == 0xFFFD) {
-                            note_unmapped_glyph("<unmapped>");
+                            // Already reported with context by the char loop.
                             txt += "\xEF\xBF\xBD";
                         } else {
                             // Already decoded correctly: use the unicode
