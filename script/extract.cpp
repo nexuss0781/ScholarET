@@ -59,6 +59,26 @@ inline std::string to_lower_copy(const std::string& s) {
     return t;
 }
 
+inline void append_utf8(std::string& out, int cp) {
+    if (cp < 0) return;
+    unsigned int c = static_cast<unsigned int>(cp);
+    if (c < 0x80) {
+        out.push_back(static_cast<char>(c));
+    } else if (c < 0x800) {
+        out.push_back(static_cast<char>(0xC0 | (c >> 6)));
+        out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+    } else if (c < 0x10000) {
+        out.push_back(static_cast<char>(0xE0 | (c >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+    } else {
+        out.push_back(static_cast<char>(0xF0 | (c >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((c >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+    }
+}
+
 inline std::string trim_copy(const std::string& s) {
     if (s.empty()) return s;
     size_t l = 0;
@@ -212,7 +232,8 @@ bool Extractor::initialize_context() {
     fz_context* c = fz_new_context(nullptr, nullptr, FZ_STORE_UNLIMITED);
     if (!c) return false;
     fz_register_document_handlers(c);
-    ctx_.reset(c, [](fz_context* p) { if (p) fz_drop_context(p); });
+    ctx_ = std::unique_ptr<fz_context, std::function<void(fz_context*)>>(
+        c, [](fz_context* p) { if (p) fz_drop_context(p); });
     return true;
 }
 
@@ -389,42 +410,43 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
     fz_stext_block* blk = stp->first_block;
     while (blk) {
         if (blk->type == FZ_STEXT_BLOCK_TEXT) {
-            fz_stext_line* ln = blk->u.text.first_line;
+            fz_stext_line* ln = blk->u.t.first_line;
             while (ln) {
                 Line l;
                 l.bbox = to_rectf(ln->bbox);
-                l.baseline_y = ln->baseline.y;
-                l.line_height = ln->height;
-                fz_stext_span* sp = ln->first_span;
-                while (sp) {
-                    if (sp->text && sp->len > 0) {
-                        Span s;
-                        s.text.assign(sp->text, static_cast<size_t>(sp->len));
-                        if (!s.text.empty() && static_cast<unsigned char>(s.text.back()) == '\n') s.text.pop_back();
-                        if (!s.text.empty() && static_cast<unsigned char>(s.text.back()) == '\r') s.text.pop_back();
-                        s.bbox = to_rectf(sp->bbox);
-                        if (sp->font) {
-                            const char* fn = fz_font_name(c, sp->font);
-                            if (fn) s.font_name_raw = fn;
-                            s.font_family = s.font_name_raw;
-                        }
-                        s.font_size = sp->size;
-                        s.font_weight = 0.0f;
-                        std::string fnl = to_lower_copy(s.font_name_raw);
-                        s.is_bold = (fnl.find("bold") != std::string::npos);
-                        s.is_italic = (fnl.find("italic") != std::string::npos || fnl.find("oblique") != std::string::npos);
-                        s.is_monospace = (fnl.find("mono") != std::string::npos || fnl.find("courier") != std::string::npos || fnl.find("typewriter") != std::string::npos);
-                        s.is_serif = (fnl.find("serif") != std::string::npos);
-                        s.is_sans = (fnl.find("sans") != std::string::npos);
-                        if (s.is_bold) s.font_weight *= 1.05f;
-                        if (!s.text.empty() && s.font_size > 0.01f) {
-                            lines_list.push_back(l);
-                            lines_list.back().spans.clear();
-                            lines_list.back().spans.push_back(std::move(s));
-                            l = lines_list.back();
-                        }
+                l.baseline_y = ln->first_char ? ln->first_char->origin.y : ln->bbox.y1;
+                l.line_height = ln->bbox.y1 - ln->bbox.y0;
+                fz_stext_char* ch = ln->first_char;
+                while (ch) {
+                    fz_font* cf = ch->font;
+                    float csz = ch->size;
+                    Span s;
+                    fz_rect sb = ch->quad;
+                    std::string txt;
+                    while (ch && ch->font == cf && float_eq(ch->size, csz, 0.01f)) {
+                        append_utf8(txt, ch->c);
+                        sb = fz_rect_union(sb, ch->quad);
+                        ch = ch->next;
                     }
-                    sp = sp->next;
+                    s.text = txt;
+                    s.bbox = to_rectf(sb);
+                    if (cf) {
+                        const char* fn = fz_font_name(c, cf);
+                        if (fn) s.font_name_raw = fn;
+                        s.font_family = s.font_name_raw;
+                    }
+                    s.font_size = csz;
+                    s.font_weight = 0.0f;
+                    std::string fnl = to_lower_copy(s.font_name_raw);
+                    s.is_bold = (fnl.find("bold") != std::string::npos);
+                    s.is_italic = (fnl.find("italic") != std::string::npos || fnl.find("oblique") != std::string::npos);
+                    s.is_monospace = (fnl.find("mono") != std::string::npos || fnl.find("courier") != std::string::npos || fnl.find("typewriter") != std::string::npos);
+                    s.is_serif = (fnl.find("serif") != std::string::npos);
+                    s.is_sans = (fnl.find("sans") != std::string::npos);
+                    if (s.is_bold) s.font_weight *= 1.05f;
+                    if (!s.text.empty() && s.font_size > 0.01f) {
+                        l.spans.push_back(std::move(s));
+                    }
                 }
                 if (!l.spans.empty()) {
                     lines_list.push_back(std::move(l));
@@ -468,27 +490,41 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
 
 void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
     fz_context* c = ctx_.get();
-    fz_image* img_list = nullptr;
-    int nimg = 0;
+    fz_stext_page* stp = nullptr;
+    bool ok = false;
     fz_try(c) {
-        nimg = fz_page_count_images(c, page);
-    } fz_catch(c) { nimg = 0; }
-    for (int i = 0; i < nimg; ++i) {
-        fz_image* img = nullptr;
-        fz_rect ibox = fz_empty_rect;
-        fz_try(c) {
-            img = fz_page_get_image(c, page, i, &ibox);
-        } fz_catch(c) { img = nullptr; }
+        fz_stext_options opts;
+        std::memset(&opts, 0, sizeof(opts));
+        opts.flags = FZ_STEXT_PRESERVE_IMAGES;
+        stp = fz_new_stext_page(c, fz_bound_page(c, page));
+        fz_device* dev = fz_new_stext_device(c, stp, &opts);
+        fz_run_page(c, page, dev, fz_identity, nullptr);
+        fz_drop_device(c, dev);
+        ok = true;
+    } fz_catch(c) {
+        ok = false;
+    }
+    if (!ok || !stp) {
+        if (stp) fz_drop_stext_page(c, stp);
+        return;
+    }
+    for (fz_stext_block* blk = stp->first_block; blk; blk = blk->next) {
+        if (blk->type != FZ_STEXT_BLOCK_IMAGE) continue;
+        fz_image* img = blk->u.i.image;
         if (!img) continue;
+        fz_rect ibox = blk->bbox;
         fz_pixmap* pm = nullptr;
+        fz_matrix mtx = blk->u.i.transform;
         fz_try(c) {
-            pm = fz_get_pixmap_from_image(c, img, nullptr, nullptr, nullptr, 0);
+            pm = fz_get_pixmap_from_image(c, img, nullptr, &mtx, nullptr, nullptr);
         } fz_catch(c) {
-            fz_drop_image(c, img);
-            continue;
+            pm = nullptr;
         }
-        if (!pm) {
-            fz_drop_image(c, img);
+        if (!pm) continue;
+        if (config_.max_image_dimension > 0 &&
+            (pm->w > static_cast<int>(config_.max_image_dimension) ||
+             pm->h > static_cast<int>(config_.max_image_dimension))) {
+            fz_drop_pixmap(c, pm);
             continue;
         }
         ImageRef ir;
@@ -512,8 +548,8 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
         } fz_catch(c) {}
         pr.images.push_back(std::move(ir));
         fz_drop_pixmap(c, pm);
-        fz_drop_image(c, img);
     }
+    fz_drop_stext_page(c, stp);
 }
 
 std::vector<Block> Extractor::analyze_layout(const std::vector<Line>& lines, PageResult& pr) {

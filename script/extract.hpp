@@ -41,10 +41,6 @@
 struct fz_context;
 struct fz_document;
 struct fz_page;
-struct fz_stext_page;
-struct fz_stext_block;
-struct fz_stext_line;
-struct fz_stext_span;
 struct fz_image;
 struct fz_pixmap;
 
