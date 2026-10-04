@@ -168,6 +168,7 @@ struct PageTextStats {
 
 struct PageResult {
     int page_num = 0;
+    std::vector<Line> lines;
     std::vector<Block> blocks;
     std::vector<ImageRef> images;
     PageTextStats stats;

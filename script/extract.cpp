@@ -471,13 +471,13 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
     fz_image* img_list = nullptr;
     int nimg = 0;
     fz_try(c) {
-        nimg = fz_page_count_images(c, page);
+        nimg = fz_count_images(c, page);
     } fz_catch(c) { nimg = 0; }
     for (int i = 0; i < nimg; ++i) {
         fz_image* img = nullptr;
         fz_rect ibox = fz_empty_rect;
         fz_try(c) {
-            img = fz_page_get_image(c, page, i, &ibox);
+            img = fz_get_image(c, page, i, &ibox);
         } fz_catch(c) { img = nullptr; }
         if (!img) continue;
         fz_pixmap* pm = nullptr;
