@@ -14,7 +14,7 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config python3 zip
+          sudo apt-get install -y build-essential cmake pkg-config python3 zip file
 
       - name: Build MuPDF 1.23.11
         run: |
@@ -52,8 +52,13 @@ jobs:
           echo "png files: $(find out_test/assets -name '*.png' | wc -l)"
           echo "png bytes: $(du -sb out_test/assets | cut -f1)"
           echo "empty pngs: $(find out_test/assets -name '*.png' -size 0 | wc -l)"
+          sample_png=$(find out_test/assets -name '*.png' | sort | head -1)
+          echo "sample png: $sample_png"
+          file "$sample_png"
           test -s out_test/book.md
+          test "$(find out_test/assets -name '*.png' | wc -l)" -gt 0
           test "$(find out_test/assets -name '*.png' -size 0 | wc -l)" -eq 0
+          file "$sample_png" | grep -Eq 'PNG image data, [0-9]+ x [0-9]+'
 
       - name: Package output
         run: |
