@@ -86,6 +86,10 @@ struct Line {
     bool is_centered = false;
     bool is_right_aligned = false;
     float indent_left = 0.0f;
+    bool is_display_math = false;
+    float math_share = 0.0f;
+    int word_count = 0;
+    std::string text;
 };
 
 enum class BlockType {
@@ -336,7 +340,6 @@ private:
     std::string escape_md_plain(const std::string& s);
     std::string render_block_text(const Block& b);
     std::string render_line_text(const Line& l);
-    bool line_is_display_math(const Line& l);
     std::string glyph_to_latex(fz_context* c, fz_font* font, int gid, int ucs);
     void note_unmapped_glyph(const std::string& name);
     void dump_diagnostics() const;
@@ -360,6 +363,8 @@ private:
 
     mutable std::mutex diag_mutex_;
     std::map<std::string, int> unmapped_glyphs_;
+    std::map<std::string, int> math_rules_;
+    std::vector<std::string> math_rule_samples_;
     size_t stat_sup_spans_ = 0;
     size_t stat_sub_spans_ = 0;
     size_t stat_math_spans_ = 0;

@@ -134,6 +134,8 @@ struct CharInfo {
     float size = 0.0f;
     float baseline = 0.0f;
     fz_rect bbox = fz_empty_rect;
+    std::string latex;
+    bool is_math_symbol = false;
 };
 
 inline bool cp_is_math_symbol(int cp) {
@@ -338,6 +340,24 @@ inline std::string code_to_latex(int code, bool* is_math_repl) {
         }
     }
     return std::string();
+}
+
+// Resolve a character code to a unicode value through the standard encodings.
+inline int code_to_unicode(int code) {
+    if (code <= 0 || code > 255) return 0;
+    static const char* const* const kTables[] = {
+        fz_glyph_name_from_win_ansi,
+        fz_glyph_name_from_windows_1252,
+        fz_glyph_name_from_mac_roman,
+        fz_glyph_name_from_adobe_standard,
+    };
+    for (const char* const* tbl : kTables) {
+        const char* nm = tbl[code];
+        if (!nm || !*nm || nm[0] == '.') continue;
+        int u = fz_unicode_from_glyph_name(nm);
+        if (u > 0) return u;
+    }
+    return 0;
 }
 
 // Turn bare radical signs into \sqrt{...} groups inside an already-math string.
@@ -659,27 +679,51 @@ PageResult Extractor::process_page(fz_document* doc, int page_num, fz_page* page
 
 void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
     fz_context* c = ctx_.get();
+
+    // The page is extracted twice on purpose:
+    //   pass A (no CID flag) gives the true unicode, and yields U+FFFD for every
+    //          glyph MuPDF could not map;
+    //   pass B (CID flag) gives the raw code for those same positions.
+    // Comparing them position by position tells us exactly which glyphs were
+    // unmapped, so we can name them through the encoding tables instead of
+    // guessing -- and we never mistake a mapped character for a raw code.
+    auto run_stext = [&](fz_stext_page** out, int flags) -> bool {
+        bool ok = false;
+        fz_try(c) {
+            fz_stext_options opts;
+            std::memset(&opts, 0, sizeof(opts));
+            opts.flags = flags;
+            *out = fz_new_stext_page(c, fz_bound_page(c, page));
+            fz_device* dev = fz_new_stext_device(c, *out, &opts);
+            fz_run_page(c, page, dev, fz_identity, nullptr);
+            fz_drop_device(c, dev);
+            ok = true;
+        } fz_catch(c) {
+            ok = false;
+        }
+        return ok;
+    };
+
     fz_stext_page* stp = nullptr;
-    fz_try(c) {
-        stp = fz_new_stext_page(c, fz_bound_page(c, page));
-        // FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE makes MuPDF hand us the CID in
-        // fz_stext_char.c instead of U+FFFD for glyphs it cannot map, which is
-        // what lets glyph_to_latex() recover them.
-        fz_stext_options opts;
-        std::memset(&opts, 0, sizeof(opts));
-        opts.flags = FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE;
-        fz_device* dev = fz_new_stext_device(c, stp, &opts);
-        fz_run_page(c, page, dev, fz_identity, nullptr);
-        fz_drop_device(c, dev);
-    } fz_catch(c) {
+    fz_stext_page* cidp = nullptr;
+    if (!run_stext(&stp, 0)) {
         if (stp) fz_drop_stext_page(c, stp);
         return;
     }
+    if (!run_stext(&cidp, FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE)) {
+        if (cidp) fz_drop_stext_page(c, cidp);
+        cidp = nullptr;
+    }
     std::vector<Line> lines_list;
     std::vector<float> fsizes_all;
+    // Walk both passes line by line so char i of pass A lines up with char i of
+    // pass B. Bail out of the merge if the two ever disagree in length.
+    fz_stext_block* cidblk = cidp ? cidp->first_block : nullptr;
     fz_stext_block* blk = stp->first_block;
     while (blk) {
         if (blk->type == FZ_STEXT_BLOCK_TEXT) {
+            fz_stext_line* cidln = (cidblk && cidblk->type == FZ_STEXT_BLOCK_TEXT)
+                                       ? cidblk->u.t.first_line : nullptr;
             fz_stext_line* ln = blk->u.t.first_line;
             while (ln) {
                 Line l;
@@ -687,6 +731,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                 l.baseline_y = ln->first_char ? ln->first_char->origin.y : ln->bbox.y1;
                 l.line_height = ln->bbox.y1 - ln->bbox.y0;
                 fz_stext_char* ch = ln->first_char;
+                fz_stext_char* cidch = cidln ? cidln->first_char : nullptr;
                 std::vector<CharInfo> chars;
                 while (ch) {
                     CharInfo ci;
@@ -696,9 +741,40 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     ci.size = ch->size;
                     ci.baseline = ch->origin.y;
                     ci.bbox = fz_rect_from_quad(ch->quad);
+                    if (ch->c == 0xFFFD || ch->c == 0) {
+                        // Unmapped in pass A: take the raw code from pass B.
+                        int code = cidch ? cidch->c : 0;
+                        bool mrepl = false;
+                        std::string rep = code_to_latex(code, &mrepl);
+                        if (mrepl) {
+                            ci.ucs = -static_cast<int>(rep.size());
+                            ci.latex = rep;
+                            ci.is_math_symbol = true;
+                            ++stat_glyph_fixed_;
+                            note_unmapped_glyph("<recovered>");
+                        } else if (code > 0 && code != 0xFFFD) {
+                            // Not a math symbol, but the code still names a
+                            // glyph we can spell out.
+                            ci.ucs = -1;
+                            ci.latex = std::string();
+                            int u = code_to_unicode(code);
+                            if (u > 0) {
+                                append_utf8(ci.latex, u);
+                                ++stat_glyph_fixed_;
+                                note_unmapped_glyph("<recovered-char>");
+                            } else {
+                                ci.ucs = 0xFFFD;
+                            }
+                        } else {
+                            ci.ucs = 0xFFFD;
+                            note_unmapped_glyph("<unmapped>");
+                        }
+                        if (cidch) cidch = cidch->next;
+                    }
                     chars.push_back(ci);
                     ch = ch->next;
                 }
+                if (cidln) cidln = cidln->next;
 
                 float dom_size = 0.0f;
                 float dom_base = 0.0f;
@@ -749,24 +825,13 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         if (x.font != head.font) break;
                         if (!float_eq(x.size, head.size, 0.01f)) break;
                         if (script_of(cj) != script) break;
-                        if (x.ucs == 0 || x.ucs == 0xFFFD) {
-                            // The text device was created with
-                            // FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE, so an
-                            // unmapped glyph arrives as its raw code and can
-                            // usually still be named through the encoding tables.
-                            bool mrepl = false;
-                            std::string rep = code_to_latex(x.ucs, &mrepl);
-                            if (mrepl) {
-                                txt += rep;
-                                saw_math_symbol = true;
-                                ++stat_glyph_fixed_;
-                            } else if (x.ucs == 0) {
-                                note_unmapped_glyph("<unmapped>");
-                                txt += "\xEF\xBF\xBD";
-                            } else {
-                                note_unmapped_glyph("<replacement>");
-                                txt += "\xEF\xBF\xBD";
-                            }
+                        if (x.ucs < 0 && !x.latex.empty()) {
+                            // Glyph recovered from the CID pass.
+                            txt += x.latex;
+                            if (x.is_math_symbol) saw_math_symbol = true;
+                        } else if (x.ucs == 0 || x.ucs == 0xFFFD) {
+                            note_unmapped_glyph("<unmapped>");
+                            txt += "\xEF\xBF\xBD";
                         } else {
                             bool mrepl = false;
                             std::string rep = code_to_latex(x.ucs, &mrepl);
@@ -803,7 +868,22 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     if (s.is_bold) s.font_weight *= 1.05f;
                     s.script = script;
                     if (!s.text.empty() && s.font_size > 0.01f) {
-                        s.is_math = saw_math_symbol || (script != 0) || span_looks_like_math(s.text, fnl);
+                        const char* rule = "none";
+                        if (saw_math_symbol) rule = "glyph";
+                        else if (script != 0) rule = "script";
+                        else if (font_is_math(fnl)) rule = "font";
+                        else if (s.text.find('=') != std::string::npos) rule = "equals";
+                        else if (math_symbol_ratio(s.text) >= 0.6f) rule = "ratio";
+                        else if (looks_like_quantity(s.text)) rule = "quantity";
+                        s.is_math = (rule[0] != 'n');
+                        if (s.is_math) {
+                            std::lock_guard<std::mutex> lk(diag_mutex_);
+                            ++math_rules_[rule];
+                            if (math_rule_samples_.size() < 24) {
+                                math_rule_samples_.push_back(std::string(rule) + " | " +
+                                                             fnl + " | " + s.text.substr(0, 40));
+                            }
+                        }
                         if (s.is_math) ++stat_math_spans_;
                         if (script == 1) ++stat_sup_spans_;
                         else if (script == 2) ++stat_sub_spans_;
@@ -818,7 +898,66 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
             }
         }
         blk = blk->next;
+        if (cidblk) cidblk = cidblk->next;
     }
+    for (auto& ll : lines_list) {
+        ll.text = join_spans_text(ll.spans);
+        ll.math_share = 0.0f;
+        size_t mc = 0, tc = 0;
+        int words = 0;
+        bool in_word = false;
+        for (const auto& sp : ll.spans) {
+            tc += sp.text.size();
+            if (sp.is_math) mc += sp.text.size();
+        }
+        for (char c : ll.text) {
+            bool sp2 = (c == ' ');
+            if (!sp2 && !in_word) { ++words; in_word = true; }
+            else if (sp2) in_word = false;
+        }
+        ll.word_count = words;
+        ll.math_share = tc > 0 ? static_cast<float>(mc) / static_cast<float>(tc) : 0.0f;
+    }
+
+    // Mark display equations while we still have per-character geometry, and
+    // heal the fragmentation that per-span math detection leaves behind
+    // ("10m/s2" must not come out as "$10m $/ $s $^{2").
+    for (auto& ll : lines_list) {
+        size_t n = ll.spans.size();
+        if (n == 0) continue;
+        bool any_math = false;
+        for (const auto& sp : ll.spans) {
+            if (sp.is_math) any_math = true;
+        }
+        if (any_math) {
+            for (size_t i = 1; i + 1 < n; ++i) {
+                Span& sp = ll.spans[i];
+                if (sp.is_math || sp.text.empty()) continue;
+                if (!ll.spans[i - 1].is_math || !ll.spans[i + 1].is_math) continue;
+                // Short bare tokens wedged between two math spans (variables,
+                // digits, unit letters) belong to the surrounding expression.
+                if (sp.text.size() > 4) continue;
+                bool alnum = true;
+                for (unsigned char ch : sp.text) {
+                    if (!std::isalnum(ch) && ch != '.' && ch != '/') { alnum = false; break; }
+                }
+                if (alnum) sp.is_math = true;
+            }
+        }
+        size_t math_chars = 0, total_chars = 0;
+        for (const auto& sp : ll.spans) {
+            total_chars += sp.text.size();
+            if (sp.is_math) math_chars += sp.text.size();
+        }
+        float share = total_chars > 0 ? static_cast<float>(math_chars) / static_cast<float>(total_chars) : 0.0f;
+        ll.is_display_math = false;
+        if (any_math && ll.math_share >= 0.55f && ll.text.find('=') != std::string::npos
+            && ll.text.size() <= 160 && ll.word_count <= 30) {
+            ll.is_display_math = true;
+        }
+        (void)share;
+    }
+
     pr.lines.clear();
     pr.lines.reserve(lines_list.size());
     for (auto& ll : lines_list) {
@@ -849,6 +988,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
     for (auto& ll : pr.lines) st.span_count += ll.spans.size();
     pr.stats = std::move(st);
     fz_drop_stext_page(c, stp);
+    if (cidp) fz_drop_stext_page(c, cidp);
 }
 
 void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
@@ -1259,37 +1399,21 @@ void Extractor::dump_diagnostics() const {
     std::cerr << "[SCHOLARET-DIAG] subscript spans: " << stat_sub_spans_ << "\n";
     std::cerr << "[SCHOLARET-DIAG] glyphs recovered: " << stat_glyph_fixed_ << "\n";
     std::cerr << "[SCHOLARET-DIAG] distinct unmapped glyph names: " << v.size() << "\n";
-    std::cerr << "[SCHOLARET-DIAG] top unmapped glyphs:";
+    std::cerr << "[SCHOLARET-DIAG] math rules:";
+    for (const auto& kv : math_rules_) {
+        std::cerr << " [" << kv.first << "=" << kv.second << "]";
+    }
+    std::cerr << "\n[SCHOLARET-DIAG] math rule samples:";
+    for (const auto& s : math_rule_samples_) {
+        std::cerr << "\n  " << s;
+    }
+    std::cerr << "\n[SCHOLARET-DIAG] top unmapped glyphs:";
     size_t shown = 0;
     for (const auto& p : v) {
         if (shown++ >= 25) break;
         std::cerr << " [" << p.first << "=" << p.second << "]";
     }
     std::cerr << "\n";
-}
-
-bool Extractor::line_is_display_math(const Line& l) {
-    if (l.spans.empty()) return false;
-    std::string all = join_spans_text(l.spans);
-    if (all.empty()) return false;
-    if (all.find('=') == std::string::npos) return false;
-    if (all.size() > 160) return false;
-    int math_spans = 0;
-    for (const auto& s : l.spans) {
-        if (s.is_math) ++math_spans;
-    }
-    if (math_spans == 0) return false;
-    float r = math_symbol_ratio(all);
-    int words = 0;
-    bool in_word = false;
-    for (char c : all) {
-        bool sp = (c == ' ');
-        if (!sp && !in_word) { ++words; in_word = true; }
-        else if (sp) in_word = false;
-    }
-    if (words > 30) return false;
-    // Either clearly symbol dominated, or built from several math spans.
-    return (r >= 0.15f) || (r >= 0.06f && math_spans >= 2);
 }
 
 std::string Extractor::render_line_text(const Line& l) {
@@ -1320,16 +1444,31 @@ std::string Extractor::render_block_text(const Block& b) {
     if (b.type == BlockType::Code) return block_text(b);
     if (b.lines.empty()) return escape_md_plain(block_text(b));
 
-    const bool display = line_is_display_math(b.lines.front());
+    // A paragraph that is entirely one displayed equation becomes a $$ block;
+    // otherwise each qualifying line is lifted out into its own $$ block.
+    bool all_display = true;
+    for (const auto& l : b.lines) {
+        if (!l.is_display_math) { all_display = false; break; }
+    }
+    if (all_display && b.lines.size() >= 1) {
+        std::string out = "$$";
+        for (const auto& l : b.lines) {
+            out += "\n";
+            out += render_line_text(l);
+        }
+        out += "\n$$\n";
+        return out;
+    }
+
     std::string out;
     for (size_t i = 0; i < b.lines.size(); ++i) {
-        if (i) out.push_back(' ');
-        out += render_line_text(b.lines[i]);
-    }
-    if (display) {
-        std::lock_guard<std::mutex> lk(diag_mutex_);
-        ++stat_display_lines_;
-        return "$$\n" + out + "\n$$\n";
+        const Line& l = b.lines[i];
+        if (i) {
+            if (l.is_display_math) out += "\n$$\n";
+            else out.push_back(' ');
+        }
+        out += render_line_text(l);
+        if (l.is_display_math) out += "\n$$\n";
     }
     return out;
 }
