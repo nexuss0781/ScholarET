@@ -12,15 +12,15 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config \
-            libfreetype6-dev libjpeg-dev libopenjp2-7-dev zlib1g-dev liblcms2-dev
+          sudo apt-get install -y build-essential cmake pkg-config python3
 
       - name: Build MuPDF 1.23.11
         run: |
-          curl -L -o /tmp/mupdf.tar.gz https://github.com/ArtifexSoftware/mupdf/archive/refs/tags/1.23.11.tar.gz
-          tar xzf /tmp/mupdf.tar.gz -C /tmp
+          git clone --depth 1 --branch 1.23.11 --shallow-submodules --recurse-submodules \
+            https://github.com/ArtifexSoftware/mupdf.git /tmp/mupdf-1.23.11
           cd /tmp/mupdf-1.23.11
-          make -j$(nproc) HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LCMS2=yes
+          test -f thirdparty/lcms2/include/lcms2mt.h
+          make -j$(nproc) HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
           sudo make install
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
