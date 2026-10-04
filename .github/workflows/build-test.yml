@@ -20,7 +20,7 @@ jobs:
           curl -L -o /tmp/mupdf.tar.gz https://github.com/ArtifexSoftware/mupdf/archive/refs/tags/1.23.11.tar.gz
           tar xzf /tmp/mupdf.tar.gz -C /tmp
           cd /tmp/mupdf-1.23.11
-          make -j$(nproc) HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
+          make -j$(nproc) HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no HAVE_LCMS2=yes
           sudo make install
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
