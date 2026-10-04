@@ -421,11 +421,15 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     fz_font* cf = ch->font;
                     float csz = ch->size;
                     Span s;
-                    fz_rect sb = ch->quad;
+                    fz_rect sb = fz_rect_from_quad(ch->quad);
                     std::string txt;
                     while (ch && ch->font == cf && float_eq(ch->size, csz, 0.01f)) {
                         append_utf8(txt, ch->c);
-                        sb = fz_rect_union(sb, ch->quad);
+                        fz_rect cr = fz_rect_from_quad(ch->quad);
+                        if (cr.x0 < sb.x0) sb.x0 = cr.x0;
+                        if (cr.y0 < sb.y0) sb.y0 = cr.y0;
+                        if (cr.x1 > sb.x1) sb.x1 = cr.x1;
+                        if (cr.y1 > sb.y1) sb.y1 = cr.y1;
                         ch = ch->next;
                     }
                     s.text = txt;
