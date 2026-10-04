@@ -360,6 +360,61 @@ inline std::string unicode_to_latex(int cp, bool* is_math_repl) {
     return std::string();
 }
 
+// Candidate unicodes worth asking about when a glyph could not be decoded.
+// Deliberately restricted to characters that actually occur in this material, so
+// that a gid hit is meaningful evidence rather than a coincidence.
+inline const std::vector<int>& glyph_recovery_candidates() {
+    static const std::vector<int> kCandidates = [] {
+        std::vector<int> v;
+        for (int u = 0x20; u <= 0x7E; ++u) v.push_back(u);   // ASCII
+        for (int u = 0xA0; u <= 0xFF; ++u) v.push_back(u);   // Latin-1
+        for (int u = 0x00BC; u <= 0x00BE; ++u) v.push_back(u); // vulgar fractions
+        v.push_back(0x0386);
+        for (int u = 0x0391; u <= 0x03C9; ++u) v.push_back(u); // Greek
+        for (int u = 0x2013; u <= 0x2014; ++u) v.push_back(u); // dashes
+        for (int u = 0x2018; u <= 0x201D; ++u) v.push_back(u); // quotes
+        v.push_back(0x2026);                                   // ellipsis
+        for (int u = 0x2190; u <= 0x21FF; ++u) v.push_back(u); // arrows
+        for (int u = 0x2200; u <= 0x22FF; ++u) v.push_back(u); // math operators
+        v.push_back(0x2212);                                   // minus sign
+        v.push_back(0x00B0);                                   // degree
+        return v;
+    }();
+    return kCandidates;
+}
+
+// Recover the unicode behind a glyph pass A could not decode.
+//
+// Pass B returns the raw character code, and for these subset fonts that is the
+// glyph id -- a value whose meaning depends entirely on the font, which is why
+// reading it through the standard encoding tables produced nonsense (a solidus
+// came out as a pilcrow, and two different codes both looked like "=").
+//
+// So ask the font directly instead: fz_font_unicode_to_glyph() inverts the
+// mapping, and a code that is really a gid will match. Because many fonts route
+// several unicodes to one glyph (U+002D and U+2212, say), a hit is only accepted
+// when every matching candidate renders to the same text; anything genuinely
+// ambiguous reports as such and stays U+FFFD.
+inline int resolve_glyph_unicode(fz_font* font, int gid) {
+    if (!font || gid <= 0) return 0;
+    int chosen = 0;
+    std::string chosen_out;
+    for (int u : glyph_recovery_candidates()) {
+        int g = 0;
+        if (fz_font_unicode_to_glyph(font, u) != gid) continue;
+        bool mrepl = false;
+        std::string out = unicode_to_latex(u, &mrepl);
+        if (!mrepl) append_utf8(out, u);
+        if (chosen == 0) {
+            chosen = u;
+            chosen_out = out;
+        } else if (out != chosen_out) {
+            return -1;  // candidates disagree: do not guess
+        }
+    }
+    return chosen;
+}
+
 // Turn bare radical signs into \sqrt{...} groups inside an already-math string.
 inline std::string apply_radicals(const std::string& s) {
     const std::string kRadical = "\xE2\x88\x9A";
@@ -750,18 +805,17 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         // explicitly confirmed mapping is honoured; the rest stay
                         // U+FFFD and are reported with their context below.
                         int code = cidch ? cidch->c : 0;
-                        std::string rep;
-                        if (code > 0 && code != 0xFFFD) {
-                            rep = unmapped_code_to_latex(code);
-                            ci.unmapped_code = code;
-                        }
-                        if (!rep.empty()) {
-                            ci.ucs = -static_cast<int>(rep.size());
-                            ci.latex = rep;
-                            ci.is_math_symbol = true;
+                        int u = (code > 0 && code != 0xFFFD)
+                                    ? resolve_glyph_unicode(ci.font, code)
+                                    : 0;
+                        if (u > 0) {
+                            // Unambiguous: the font agrees on what this glyph
+                            // is, so treat it like any decoded character.
+                            ci.ucs = u;
                             ++stat_glyph_fixed_;
                         } else {
                             ci.ucs = 0xFFFD;
+                            ci.unmapped_code = code;
                         }
                         if (cidch) cidch = cidch->next;
                     }
@@ -774,8 +828,15 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                 // glyphs with context on both sides.
                 for (size_t i = 0; i < chars.size(); ++i) {
                     if (chars[i].ucs != 0xFFFD && chars[i].ucs != 0) continue;
-                    note_unmapped_glyph("code=" + num_to_str(chars[i].unmapped_code) +
-                                         " ctx=" + char_context(chars, chars[i], i));
+                    const int r = (chars[i].unmapped_code > 0)
+                                      ? resolve_glyph_unicode(chars[i].font,
+                                                              chars[i].unmapped_code)
+                                      : 0;
+                    note_unmapped_glyph(
+                        "gid=" + num_to_str(chars[i].unmapped_code) +
+                        (r > 0 ? " -> U+" : r < 0 ? " ambiguous ctx=" : " unknown ctx=") +
+                        (r > 0 ? (r < 0x100 ? ("00" + num_to_str(r)) : num_to_str(r))
+                               : char_context(chars, chars[i], i)));
                 }
 
                 float dom_size = 0.0f;
