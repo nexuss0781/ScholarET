@@ -2,7 +2,6 @@
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
-#include <mupdf/stext.h>
 
 #include <algorithm>
 #include <array>
@@ -410,7 +409,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                             s.font_family = s.font_name_raw;
                         }
                         s.font_size = sp->size;
-                        s.font_weight = sp->size;
+                        s.font_weight = 0.0f;
                         std::string fnl = to_lower_copy(s.font_name_raw);
                         s.is_bold = (fnl.find("bold") != std::string::npos);
                         s.is_italic = (fnl.find("italic") != std::string::npos || fnl.find("oblique") != std::string::npos);
