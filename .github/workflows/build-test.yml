@@ -1,0 +1,35 @@
+name: Build and Test
+
+on: [push, pull_request]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libmupdf-dev libfreetype6-dev libjpeg-dev \
+            libopenjp2-7-dev zlib1g-dev liblcms2-dev
+
+      - name: Build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+
+      - name: Download sample
+        run: |
+          mkdir -p data
+          curl -L -o data/Physics.pdf "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Physics.pdf"
+
+      - name: Extract
+        run: |
+          ./build/extract --in data/Physics.pdf --out out_test --threads 0
+          echo "---"
+          head -5 out_test/book.md
+          echo "---COUNT---"
+          find out_test/assets -name "*.png" | wc -l
