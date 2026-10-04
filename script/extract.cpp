@@ -136,6 +136,9 @@ struct CharInfo {
     fz_rect bbox = fz_empty_rect;
     std::string latex;
     bool is_math_symbol = false;
+    // Raw code from the CID pass when ucs is U+FFFD; 0 otherwise. Kept so the
+    // context can be reconstructed once the whole line is known.
+    int unmapped_code = 0;
 };
 
 inline bool cp_is_math_symbol(int cp) {
@@ -738,7 +741,6 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     ci.size = ch->size;
                     ci.baseline = ch->origin.y;
                     ci.bbox = fz_rect_from_quad(ch->quad);
-                    const size_t ci_index = chars.size();
                     if (ch->c == 0xFFFD || ch->c == 0) {
                         // Unmapped in pass A. Pass B hands us the raw code, but
                         // nothing here says which encoding the subset font uses,
@@ -751,11 +753,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         std::string rep;
                         if (code > 0 && code != 0xFFFD) {
                             rep = unmapped_code_to_latex(code);
-                            note_unmapped_glyph("code=" + num_to_str(code) +
-                                                 " ctx=" + char_context(chars, ci, ci_index));
-                        } else {
-                            note_unmapped_glyph("<no-code> ctx=" +
-                                                char_context(chars, ci, ci_index));
+                            ci.unmapped_code = code;
                         }
                         if (!rep.empty()) {
                             ci.ucs = -static_cast<int>(rep.size());
@@ -771,6 +769,14 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     ch = ch->next;
                 }
                 if (cidln) cidln = cidln->next;
+
+                // Now that every char on the line is known, report unmapped
+                // glyphs with context on both sides.
+                for (size_t i = 0; i < chars.size(); ++i) {
+                    if (chars[i].ucs != 0xFFFD && chars[i].ucs != 0) continue;
+                    note_unmapped_glyph("code=" + num_to_str(chars[i].unmapped_code) +
+                                         " ctx=" + char_context(chars, chars[i], i));
+                }
 
                 float dom_size = 0.0f;
                 float dom_base = 0.0f;
