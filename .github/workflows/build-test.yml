@@ -21,7 +21,7 @@ jobs:
           cd /tmp/mupdf-1.23.11
           test -f thirdparty/lcms2/include/lcms2mt.h
           make -j$(nproc) HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
-          sudo make install
+          sudo make install HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
