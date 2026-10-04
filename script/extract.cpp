@@ -400,8 +400,8 @@ inline int resolve_glyph_unicode(fz_font* font, int gid) {
     int chosen = 0;
     std::string chosen_out;
     for (int u : glyph_recovery_candidates()) {
-        int g = 0;
-        if (fz_font_unicode_to_glyph(font, u) != gid) continue;
+        int g = fz_get_glyph_name(font, gid) ? gid : -1;  // TEMP PROBE
+        if (g != gid) continue;
         bool mrepl = false;
         std::string out = unicode_to_latex(u, &mrepl);
         if (!mrepl) append_utf8(out, u);
