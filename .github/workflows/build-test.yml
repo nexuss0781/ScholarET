@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -13,10 +13,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config \
-            libmupdf-dev libfreetype6-dev libjpeg-dev \
-            libopenjp2-7-dev zlib1g-dev liblcms2-dev
+            libfreetype6-dev libjpeg-dev libopenjp2-7-dev zlib1g-dev liblcms2-dev
+
+      - name: Build MuPDF 1.23.11
+        run: |
+          curl -L -o /tmp/mupdf.tar.gz https://github.com/ArtifexSoftware/mupdf/archive/refs/tags/1.23.11.tar.gz
+          tar xzf /tmp/mupdf.tar.gz -C /tmp
+          cd /tmp/mupdf-1.23.11
+          make -j$(nproc) HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
+          sudo make install
+          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Build
+        env:
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
+          LD_LIBRARY_PATH: /usr/local/lib
         run: |
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j$(nproc)
@@ -27,6 +39,8 @@ jobs:
           curl -L -o data/Physics.pdf "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Physics.pdf"
 
       - name: Extract
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
         run: |
           ./build/extract --in data/Physics.pdf --out out_test --threads 0
           echo "---"
