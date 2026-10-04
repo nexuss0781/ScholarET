@@ -516,27 +516,43 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
     }
     for (fz_stext_block* blk = stp->first_block; blk; blk = blk->next) {
         if (blk->type != FZ_STEXT_BLOCK_IMAGE) continue;
-        fz_image* img = blk->u.i.image;
-        if (!img) continue;
         fz_rect ibox = blk->bbox;
+        if (fz_is_empty_rect(ibox)) continue;
+        if (fz_is_infinite_rect(ibox)) continue;
+        float pad = 1.0f;
+        fz_rect r = fz_rect_expand(ibox, pad);
+        float zoom = 150.0f / 72.0f;
+        if (config_.image_dpi_hint > 0) {
+            zoom = static_cast<float>(config_.image_dpi_hint) / 72.0f;
+        }
+        if (config_.max_image_dimension > 0) {
+            float rw = r.x1 - r.x0;
+            float rh = r.y1 - r.y0;
+            float maxd = static_cast<float>(config_.max_image_dimension);
+            if (rw > 0.0f && rh > 0.0f) {
+                float zmax = std::min(maxd / rw, maxd / rh);
+                if (zoom > zmax) zoom = zmax;
+            }
+        }
+        if (zoom <= 0.0f) zoom = 1.0f;
+        int w = static_cast<int>((r.x1 - r.x0) * zoom + 0.5f);
+        int h = static_cast<int>((r.y1 - r.y0) * zoom + 0.5f);
+        if (w < 1) w = 1;
+        if (h < 1) h = 1;
         fz_pixmap* pm = nullptr;
-        fz_matrix mtx = blk->u.i.transform;
         fz_try(c) {
-            pm = fz_get_pixmap_from_image(c, img, nullptr, &mtx, nullptr, nullptr);
+            pm = fz_new_pixmap(c, w, h, fz_device_rgb(c), 0);
+            if (pm) {
+                fz_matrix ctm = fz_concat(fz_scale(zoom, zoom),
+                                          fz_translate(-r.x0, -r.y0));
+                fz_device* dev = fz_new_draw_device_with_bbox(c, ctm, pm, nullptr);
+                fz_run_page(c, page, dev, fz_identity, nullptr);
+                fz_drop_device(c, dev);
+            }
         } fz_catch(c) {
-            pm = nullptr;
+            if (pm) { fz_drop_pixmap(c, pm); pm = nullptr; }
         }
         if (!pm) continue;
-        if (pm->w <= 0 || pm->h <= 0) {
-            fz_drop_pixmap(c, pm);
-            continue;
-        }
-        if (config_.max_image_dimension > 0 &&
-            (pm->w > static_cast<int>(config_.max_image_dimension) ||
-             pm->h > static_cast<int>(config_.max_image_dimension))) {
-            fz_drop_pixmap(c, pm);
-            continue;
-        }
         ImageRef ir;
         ir.page_num = pr.page_num;
         ir.index = static_cast<int>(pr.images.size());
