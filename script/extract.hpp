@@ -340,7 +340,6 @@ private:
     std::string escape_md_plain(const std::string& s);
     std::string render_block_text(const Block& b);
     std::string render_line_text(const Line& l);
-    std::string glyph_to_latex(fz_context* c, fz_font* font, int gid, int ucs);
     void note_unmapped_glyph(const std::string& name);
     void dump_diagnostics() const;
     std::string clean_text(const std::string& s);

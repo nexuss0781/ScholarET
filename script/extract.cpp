@@ -303,27 +303,32 @@ inline std::string glyph_name_to_latex(const std::string& name) {
 // Sets *is_math_repl when the code denotes a mathematical symbol (radical,
 // times, plusminus, ...) so the caller can mark the span as math.
 // Returns an empty string when the code is not a math symbol.
-inline std::string code_to_latex(int code, bool* is_math_repl) {
-    *is_math_repl = false;
-    if (code <= 0 || code > 255) return std::string();
-    static const char* const* const kTables[] = {
-        fz_glyph_name_from_win_ansi,
-        fz_glyph_name_from_windows_1252,
-        fz_glyph_name_from_mac_roman,
-        fz_glyph_name_from_adobe_standard,
-        fz_glyph_name_from_iso8859_7,
-        fz_glyph_name_from_koi8u,
-    };
-    for (const char* const* tbl : kTables) {
-        const char* nm = tbl[code];
-        if (!nm || !*nm || nm[0] == '.') continue;
-        std::string latex = glyph_name_to_latex(std::string(nm));
-        if (!latex.empty()) {
-            *is_math_repl = true;
-            return latex;
-        }
+
+// Confirmed mappings for glyph codes that MuPDF cannot decode in this book.
+// Keyed by the raw code reported by the CID pass. Filled in from the
+// "code=... ctx=..." lines printed by dump_diagnostics(); an entry here is only
+// added once the surrounding text proves what the glyph is. Codes that are not
+// listed stay U+FFFD rather than being guessed at.
+inline std::string unmapped_code_to_latex(int code) {
+    switch (code) {
+        default: return std::string();
     }
-    return std::string();
+}
+
+// Render the text around an unmapped glyph so the diagnostics show what it was.
+inline std::string char_context(const std::vector<CharInfo>& chars,
+                                const CharInfo& cur, size_t idx) {
+    auto cp_text = [](int cp) -> std::string {
+        if (cp <= 0) return std::string();
+        std::string t;
+        append_utf8(t, cp);
+        return t;
+    };
+    std::string before;
+    for (size_t i = (idx >= 6 ? idx - 6 : 0); i < idx; ++i) before += cp_text(chars[i].ucs);
+    std::string after;
+    for (size_t i = idx; i < chars.size() && i < idx + 6; ++i) after += cp_text(chars[i].ucs);
+    return "[" + before + "|" + cur.latex + "|?" + after + "]";
 }
 
 // Sound unicode -> LaTeX conversion, for characters MuPDF mapped correctly.
@@ -350,24 +355,6 @@ inline std::string unicode_to_latex(int cp, bool* is_math_repl) {
     }
     *is_math_repl = false;
     return std::string();
-}
-
-// Resolve a character code to a unicode value through the standard encodings.
-inline int code_to_unicode(int code) {
-    if (code <= 0 || code > 255) return 0;
-    static const char* const* const kTables[] = {
-        fz_glyph_name_from_win_ansi,
-        fz_glyph_name_from_windows_1252,
-        fz_glyph_name_from_mac_roman,
-        fz_glyph_name_from_adobe_standard,
-    };
-    for (const char* const* tbl : kTables) {
-        const char* nm = tbl[code];
-        if (!nm || !*nm || nm[0] == '.') continue;
-        int u = fz_unicode_from_glyph_name(nm);
-        if (u > 0) return u;
-    }
-    return 0;
 }
 
 // Turn bare radical signs into \sqrt{...} groups inside an already-math string.
@@ -751,33 +738,32 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     ci.size = ch->size;
                     ci.baseline = ch->origin.y;
                     ci.bbox = fz_rect_from_quad(ch->quad);
+                    const size_t ci_index = chars.size();
                     if (ch->c == 0xFFFD || ch->c == 0) {
-                        // Unmapped in pass A: take the raw code from pass B.
+                        // Unmapped in pass A. Pass B hands us the raw code, but
+                        // nothing here says which encoding the subset font uses,
+                        // and guessing from the standard tables yields wrong
+                        // characters: it reported "degree" and "pilcrow" where
+                        // the glyphs were really "\times" and "/". So only an
+                        // explicitly confirmed mapping is honoured; the rest stay
+                        // U+FFFD and are reported with their context below.
                         int code = cidch ? cidch->c : 0;
-                        bool mrepl = false;
-                        std::string rep = code_to_latex(code, &mrepl);
-                        if (mrepl) {
+                        std::string rep;
+                        if (code > 0 && code != 0xFFFD) {
+                            rep = unmapped_code_to_latex(code);
+                            note_unmapped_glyph("code=" + num_to_str(code) +
+                                                 " ctx=" + char_context(chars, ci, ci_index));
+                        } else {
+                            note_unmapped_glyph("<no-code> ctx=" +
+                                                char_context(chars, ci, ci_index));
+                        }
+                        if (!rep.empty()) {
                             ci.ucs = -static_cast<int>(rep.size());
                             ci.latex = rep;
                             ci.is_math_symbol = true;
                             ++stat_glyph_fixed_;
-                            note_unmapped_glyph("<recovered>");
-                        } else if (code > 0 && code != 0xFFFD) {
-                            // Not a math symbol, but the code still names a
-                            // glyph we can spell out.
-                            ci.ucs = -1;
-                            ci.latex = std::string();
-                            int u = code_to_unicode(code);
-                            if (u > 0) {
-                                append_utf8(ci.latex, u);
-                                ++stat_glyph_fixed_;
-                                note_unmapped_glyph("<recovered-char>");
-                            } else {
-                                ci.ucs = 0xFFFD;
-                            }
                         } else {
                             ci.ucs = 0xFFFD;
-                            note_unmapped_glyph("<unmapped>");
                         }
                         if (cidch) cidch = cidch->next;
                     }
@@ -1393,13 +1379,6 @@ std::string Extractor::escape_md_plain(const std::string& s) {
     return o;
 }
 
-std::string Extractor::glyph_to_latex(fz_context* c, fz_font* font, int gid, int ucs) {
-    (void)c;
-    (void)font;
-    (void)gid;
-    bool mrepl = false;
-    return code_to_latex(ucs, &mrepl);
-}
 
 void Extractor::note_unmapped_glyph(const std::string& name) {
     std::lock_guard<std::mutex> lk(diag_mutex_);
