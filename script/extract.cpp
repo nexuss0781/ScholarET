@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -526,6 +527,10 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
             pm = nullptr;
         }
         if (!pm) continue;
+        if (pm->w <= 0 || pm->h <= 0) {
+            fz_drop_pixmap(c, pm);
+            continue;
+        }
         if (config_.max_image_dimension > 0 &&
             (pm->w > static_cast<int>(config_.max_image_dimension) ||
              pm->h > static_cast<int>(config_.max_image_dimension))) {
@@ -548,10 +553,21 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
         }
         ir.out_path = fnpng;
         ir.rel_path_md = (fs::path(config_.assets_rel_prefix) / fs::path(fnpng).filename()).string();
+        bool saved = false;
         fz_try(c) {
             fz_save_pixmap_as_png(c, pm, fnpng.c_str());
-        } fz_catch(c) {}
-        pr.images.push_back(std::move(ir));
+            saved = true;
+        } fz_catch(c) {
+            std::fprintf(stderr, "extract: png save failed (%s): %s\n",
+                         fs::path(fnpng).filename().string().c_str(), fz_caught_message(c));
+            std::fflush(stderr);
+        }
+        if (saved) {
+            pr.images.push_back(std::move(ir));
+        } else {
+            std::error_code rm_ec;
+            fs::remove(fnpng, rm_ec);
+        }
         fz_drop_pixmap(c, pm);
     }
     fz_drop_stext_page(c, stp);
