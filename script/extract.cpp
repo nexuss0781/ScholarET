@@ -261,11 +261,8 @@ inline std::string glyph_name_to_latex(const std::string& name) {
         {"radical", "\xE2\x88\x9A"}, {"radicalex", "\xE2\x88\x9A"},
         {"multiply", "\\times"}, {"asteriskmath", "\\cdot"},
         {"dotmath", "\\cdot"}, {"periodcentered", "\\cdot"},
-        {"bullet", "\\cdot"}, {"divide", "\\div"},
-        {"plusminus", "\\pm"}, {"minusplus", "\\mp"},
-        {"minus", "-"}, {"endash", "-"}, {"emdash", "-"},
-        {"equal", "="}, {"equivalence", "\\equiv"},
-        {"notequal", "\\neq"}, {"approxequal", "\\approx"},
+                {"plusminus", "\\pm"}, {"minusplus", "\\mp"},
+                        {"notequal", "\\neq"}, {"approxequal", "\\approx"},
         {"approximatelyequal", "\\approx"}, {"similar", "\\sim"},
         {"congruent", "\\cong"}, {"propersimilar", "\\simeq"},
         {"lessequal", "\\leq"}, {"greaterequal", "\\geq"},
@@ -291,24 +288,11 @@ inline std::string glyph_name_to_latex(const std::string& name) {
         {"arrowdblright", "\\Rightarrow"}, {"arrowdblleft", "\\Leftarrow"},
         {"arrowdblboth", "\\Leftrightarrow"},
         {"implies", "\\Rightarrow"}, {"if", "\\Rightarrow"},
-        {"degree", "^\\circ"}, {"minute", "'"}, {"second", "''"},
-        {"increment", "\\Delta"}, {"delta", "\\Delta"},
-        {"incrementalt", "\\delta"}, {"Delta", "\\Delta"},
-        {"Omega", "\\Omega"}, {"omega", "\\omega"},
-        {"perpendicular", "\\perp"}, {"parallel", "\\parallel"},
-        {"angle", "\\angle"}, {"triangle", "\\triangle"},
+        {"degree", "^{\\circ}"},                 {"angle", "\\angle"}, {"triangle", "\\triangle"},
         {"therefore", "\\therefore"}, {"because", "\\because"},
         {"circleplus", "\\oplus"}, {"circlemultiply", "\\otimes"},
-        {"ellipsis", "\\ldots"}, {"emdash.", "---"},
-        {"fraction", "/"}, {"slash", "/"}, {"solidus", "/"},
-        {"period", "."}, {"comma", ","}, {"colon", ":"},
-        {"percent", "\\%"}, {"section", "\\S"}, {"paragraph", "\\P"},
-        {"dagger", "\\dagger"}, {"daggerdbl", "\\ddagger"},
-        {"numbersign", "\\#"}, {"dollar", "\\$"}, {"percentold", "\\%"},
-        {"asterisk", "*"}, {"bullet2", "\\cdot"},
-        {"summation2", "\\sum"}, {"openbullet", "\\circ"},
-        {"mho", "\\Omega"},
-    };
+        {"ellipsis", "\\ldots"},                 {"dagger", "\\dagger"}, {"daggerdbl", "\\ddagger"},
+                    };
     for (const Entry& e : kTable) {
         if (name == e.n) return e.r;
     }
@@ -929,6 +913,13 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
         for (const auto& sp : ll.spans) {
             if (sp.is_math) any_math = true;
         }
+        for (size_t i = 1; i < n; ++i) {
+            if (ll.spans[i].script != 0 && !ll.spans[i - 1].is_math
+                && !ll.spans[i - 1].text.empty() && ll.spans[i - 1].text.size() <= 12) {
+                ll.spans[i - 1].is_math = true;
+                any_math = true;
+            }
+        }
         if (any_math) {
             for (size_t i = 1; i + 1 < n; ++i) {
                 Span& sp = ll.spans[i];
@@ -950,12 +941,12 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
             if (sp.is_math) math_chars += sp.text.size();
         }
         float share = total_chars > 0 ? static_cast<float>(math_chars) / static_cast<float>(total_chars) : 0.0f;
+        ll.math_share = share;
         ll.is_display_math = false;
-        if (any_math && ll.math_share >= 0.55f && ll.text.find('=') != std::string::npos
+        if (any_math && share >= 0.55f && ll.text.find('=') != std::string::npos
             && ll.text.size() <= 160 && ll.word_count <= 30) {
             ll.is_display_math = true;
         }
-        (void)share;
     }
 
     pr.lines.clear();
@@ -1457,6 +1448,8 @@ std::string Extractor::render_block_text(const Block& b) {
             out += render_line_text(l);
         }
         out += "\n$$\n";
+        std::lock_guard<std::mutex> lk(diag_mutex_);
+        ++stat_display_lines_;
         return out;
     }
 
@@ -1468,7 +1461,11 @@ std::string Extractor::render_block_text(const Block& b) {
             else out.push_back(' ');
         }
         out += render_line_text(l);
-        if (l.is_display_math) out += "\n$$\n";
+        if (l.is_display_math) {
+            out += "\n$$\n";
+            std::lock_guard<std::mutex> lk(diag_mutex_);
+            ++stat_display_lines_;
+        }
     }
     return out;
 }
