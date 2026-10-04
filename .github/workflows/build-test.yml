@@ -45,10 +45,15 @@ jobs:
           LD_LIBRARY_PATH: /usr/local/lib
         run: |
           ./build/extract --in data/Physics.pdf --out out_test --threads 0
-          echo "---"
-          head -5 out_test/book.md
-          echo "---COUNT---"
-          find out_test/assets -name "*.png" | wc -l
+          echo "---HEAD---"
+          head -40 out_test/book.md
+          echo "---STATS---"
+          echo "md bytes: $(wc -c < out_test/book.md)"
+          echo "png files: $(find out_test/assets -name '*.png' | wc -l)"
+          echo "png bytes: $(du -sb out_test/assets | cut -f1)"
+          echo "empty pngs: $(find out_test/assets -name '*.png' -size 0 | wc -l)"
+          test -s out_test/book.md
+          test "$(find out_test/assets -name '*.png' -size 0 | wc -l)" -eq 0
 
       - name: Package output
         run: |

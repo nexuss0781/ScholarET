@@ -383,6 +383,7 @@ PageResult Extractor::process_page(fz_document* doc, int page_num, fz_page* page
     if (config_.extract_images) {
         extract_images_from_page(page, pr);
     }
+    pr.blocks = analyze_layout(pr.lines, pr);
     detect_columns(pr);
     detect_headers_footers(pr, pr.blocks);
     classify_blocks(pr.blocks, pr.stats, page_num);
