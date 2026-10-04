@@ -313,6 +313,33 @@ inline std::string glyph_name_to_latex(const std::string& name) {
     return std::string();
 }
 
+// Resolve a character code to LaTeX via the standard encoding tables.
+// Sets *is_math_repl when the code denotes a mathematical symbol (radical,
+// times, plusminus, ...) so the caller can mark the span as math.
+// Returns an empty string when the code is not a math symbol.
+inline std::string code_to_latex(int code, bool* is_math_repl) {
+    *is_math_repl = false;
+    if (code <= 0 || code > 255) return std::string();
+    static const char* const* const kTables[] = {
+        fz_glyph_name_from_win_ansi,
+        fz_glyph_name_from_windows_1252,
+        fz_glyph_name_from_mac_roman,
+        fz_glyph_name_from_adobe_standard,
+        fz_glyph_name_from_iso8859_7,
+        fz_glyph_name_from_koi8u,
+    };
+    for (const char* const* tbl : kTables) {
+        const char* nm = tbl[code];
+        if (!nm || !*nm || nm[0] == '.') continue;
+        std::string latex = glyph_name_to_latex(std::string(nm));
+        if (!latex.empty()) {
+            *is_math_repl = true;
+            return latex;
+        }
+    }
+    return std::string();
+}
+
 // Turn bare radical signs into \sqrt{...} groups inside an already-math string.
 inline std::string apply_radicals(const std::string& s) {
     const std::string kRadical = "\xE2\x88\x9A";
@@ -635,7 +662,13 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
     fz_stext_page* stp = nullptr;
     fz_try(c) {
         stp = fz_new_stext_page(c, fz_bound_page(c, page));
-        fz_device* dev = fz_new_stext_device(c, stp, nullptr);
+        // FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE makes MuPDF hand us the CID in
+        // fz_stext_char.c instead of U+FFFD for glyphs it cannot map, which is
+        // what lets glyph_to_latex() recover them.
+        fz_stext_options opts;
+        std::memset(&opts, 0, sizeof(opts));
+        opts.flags = FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE;
+        fz_device* dev = fz_new_stext_device(c, stp, &opts);
         fz_run_page(c, page, dev, fz_identity, nullptr);
         fz_drop_device(c, dev);
     } fz_catch(c) {
@@ -709,6 +742,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     const int script = script_of(ci);
                     size_t cj = ci;
                     std::string txt;
+                    bool saw_math_symbol = false;
                     fz_rect sb = head.bbox;
                     while (cj < chars.size()) {
                         const CharInfo& x = chars[cj];
@@ -716,9 +750,32 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         if (!float_eq(x.size, head.size, 0.01f)) break;
                         if (script_of(cj) != script) break;
                         if (x.ucs == 0 || x.ucs == 0xFFFD) {
-                            txt += glyph_to_latex(c, x.font, x.gid, x.ucs);
+                            // The text device was created with
+                            // FZ_STEXT_USE_CID_FOR_UNKNOWN_UNICODE, so an
+                            // unmapped glyph arrives as its raw code and can
+                            // usually still be named through the encoding tables.
+                            bool mrepl = false;
+                            std::string rep = code_to_latex(x.ucs, &mrepl);
+                            if (mrepl) {
+                                txt += rep;
+                                saw_math_symbol = true;
+                                ++stat_glyph_fixed_;
+                            } else if (x.ucs == 0) {
+                                note_unmapped_glyph("<unmapped>");
+                                txt += "\xEF\xBF\xBD";
+                            } else {
+                                note_unmapped_glyph("<replacement>");
+                                txt += "\xEF\xBF\xBD";
+                            }
                         } else {
-                            append_utf8(txt, x.ucs);
+                            bool mrepl = false;
+                            std::string rep = code_to_latex(x.ucs, &mrepl);
+                            if (mrepl) {
+                                txt += rep;
+                                saw_math_symbol = true;
+                            } else {
+                                append_utf8(txt, x.ucs);
+                            }
                         }
                         if (x.bbox.x0 < sb.x0) sb.x0 = x.bbox.x0;
                         if (x.bbox.y0 < sb.y0) sb.y0 = x.bbox.y0;
@@ -746,7 +803,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     if (s.is_bold) s.font_weight *= 1.05f;
                     s.script = script;
                     if (!s.text.empty() && s.font_size > 0.01f) {
-                        s.is_math = (script != 0) || span_looks_like_math(s.text, fnl);
+                        s.is_math = saw_math_symbol || (script != 0) || span_looks_like_math(s.text, fnl);
                         if (s.is_math) ++stat_math_spans_;
                         if (script == 1) ++stat_sup_spans_;
                         else if (script == 2) ++stat_sub_spans_;
@@ -1180,13 +1237,8 @@ std::string Extractor::glyph_to_latex(fz_context* c, fz_font* font, int gid, int
     (void)c;
     (void)font;
     (void)gid;
-    if (ucs == 0xFFFD || ucs == 0) {
-        note_unmapped_glyph("<unmapped>");
-        return "\xEF\xBF\xBD";
-    }
-    std::string out;
-    append_utf8(out, ucs);
-    return out;
+    bool mrepl = false;
+    return code_to_latex(ucs, &mrepl);
 }
 
 void Extractor::note_unmapped_glyph(const std::string& name) {
@@ -1221,15 +1273,13 @@ bool Extractor::line_is_display_math(const Line& l) {
     std::string all = join_spans_text(l.spans);
     if (all.empty()) return false;
     if (all.find('=') == std::string::npos) return false;
-    if (all.size() > 120) return false;
-    bool any_math = false;
+    if (all.size() > 160) return false;
+    int math_spans = 0;
     for (const auto& s : l.spans) {
-        if (s.is_math) any_math = true;
+        if (s.is_math) ++math_spans;
     }
-    if (!any_math) return false;
+    if (math_spans == 0) return false;
     float r = math_symbol_ratio(all);
-    // A display equation is dominated by symbols, not prose.
-    if (r < 0.18f) return false;
     int words = 0;
     bool in_word = false;
     for (char c : all) {
@@ -1237,7 +1287,9 @@ bool Extractor::line_is_display_math(const Line& l) {
         if (!sp && !in_word) { ++words; in_word = true; }
         else if (sp) in_word = false;
     }
-    return words <= 14;
+    if (words > 30) return false;
+    // Either clearly symbol dominated, or built from several math spans.
+    return (r >= 0.15f) || (r >= 0.06f && math_spans >= 2);
 }
 
 std::string Extractor::render_line_text(const Line& l) {
