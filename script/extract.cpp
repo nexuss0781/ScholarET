@@ -326,6 +326,32 @@ inline std::string code_to_latex(int code, bool* is_math_repl) {
     return std::string();
 }
 
+// Sound unicode -> LaTeX conversion, for characters MuPDF mapped correctly.
+// Deliberately does NOT consult the encoding tables: those are indexed by byte
+// code within a single encoding, not by unicode, so looking up U+00A0 there
+// yields MacRoman's "degree" and turned every non-breaking space into ^\circ.
+inline std::string unicode_to_latex(int cp, bool* is_math_repl) {
+    switch (cp) {
+        case 0x00D7: *is_math_repl = true; return "\\times";   // multiplication sign
+        case 0x00F7: *is_math_repl = true; return "\\div";     // division sign
+        case 0x00B1: *is_math_repl = true; return "\\pm";      // plus-minus
+        case 0x00B0: *is_math_repl = true; return "^{\\circ}"; // degree
+        case 0x2264: *is_math_repl = true; return "\\leq";
+        case 0x2265: *is_math_repl = true; return "\\geq";
+        case 0x2260: *is_math_repl = true; return "\\neq";
+        case 0x2248: *is_math_repl = true; return "\\approx";
+        case 0x221E: *is_math_repl = true; return "\\infty";
+        case 0x2202: *is_math_repl = true; return "\\partial";
+        case 0x220F: *is_math_repl = true; return "\\prod";
+        case 0x222B: *is_math_repl = true; return "\\int";
+        case 0x00B7: *is_math_repl = true; return "\\cdot";    // middle dot
+        case 0x2212: *is_math_repl = true; return "-";          // minus sign
+        default: break;
+    }
+    *is_math_repl = false;
+    return std::string();
+}
+
 // Resolve a character code to a unicode value through the standard encodings.
 inline int code_to_unicode(int code) {
     if (code <= 0 || code > 255) return 0;
@@ -817,8 +843,11 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                             note_unmapped_glyph("<unmapped>");
                             txt += "\xEF\xBF\xBD";
                         } else {
+                            // Already decoded correctly: use the unicode
+                            // directly. Never run these through the encoding
+                            // tables, which are indexed by byte code.
                             bool mrepl = false;
-                            std::string rep = code_to_latex(x.ucs, &mrepl);
+                            std::string rep = unicode_to_latex(x.ucs, &mrepl);
                             if (mrepl) {
                                 txt += rep;
                                 saw_math_symbol = true;
