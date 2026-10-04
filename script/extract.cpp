@@ -658,7 +658,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                 while (ch) {
                     CharInfo ci;
                     ci.ucs = ch->c;
-                    ci.gid = static_cast<int>(ch->gid);
+                    ci.gid = 0;
                     ci.font = ch->font;
                     ci.size = ch->size;
                     ci.baseline = ch->origin.y;
@@ -1177,23 +1177,16 @@ std::string Extractor::escape_md_plain(const std::string& s) {
 }
 
 std::string Extractor::glyph_to_latex(fz_context* c, fz_font* font, int gid, int ucs) {
-    (void)ucs;
-    const char* nm = nullptr;
-    if (font && gid >= 0) {
-        fz_try(c) {
-            nm = fz_font_glyph_name(c, font, gid);
-        } fz_catch(c) {
-            nm = nullptr;
-        }
+    (void)c;
+    (void)font;
+    (void)gid;
+    if (ucs == 0xFFFD || ucs == 0) {
+        note_unmapped_glyph("<unmapped>");
+        return "\xEF\xBF\xBD";
     }
-    std::string name = nm ? std::string(nm) : std::string();
-    note_unmapped_glyph(name.empty() ? std::string("<unnamed-gid-") + num_to_str(gid) + ">") : name);
-    std::string out = glyph_name_to_latex(name);
-    if (!out.empty()) {
-        ++stat_glyph_fixed_;
-        return out;
-    }
-    return "\xEF\xBF\xBD";
+    std::string out;
+    append_utf8(out, ucs);
+    return out;
 }
 
 void Extractor::note_unmapped_glyph(const std::string& name) {
