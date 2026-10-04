@@ -2,6 +2,7 @@
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
+#include <mupdf/stext.h>
 
 #include <algorithm>
 #include <array>
@@ -409,7 +410,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                             s.font_family = s.font_name_raw;
                         }
                         s.font_size = sp->size;
-                        s.font_weight = sp->wmode >= 0 ? sp->size : sp->size * 0.9f;
+                        s.font_weight = sp->size;
                         std::string fnl = to_lower_copy(s.font_name_raw);
                         s.is_bold = (fnl.find("bold") != std::string::npos);
                         s.is_italic = (fnl.find("italic") != std::string::npos || fnl.find("oblique") != std::string::npos);
@@ -471,13 +472,13 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
     fz_image* img_list = nullptr;
     int nimg = 0;
     fz_try(c) {
-        nimg = fz_count_images(c, page);
+        nimg = fz_page_count_images(c, page);
     } fz_catch(c) { nimg = 0; }
     for (int i = 0; i < nimg; ++i) {
         fz_image* img = nullptr;
         fz_rect ibox = fz_empty_rect;
         fz_try(c) {
-            img = fz_get_image(c, page, i, &ibox);
+            img = fz_page_get_image(c, page, i, &ibox);
         } fz_catch(c) { img = nullptr; }
         if (!img) continue;
         fz_pixmap* pm = nullptr;
