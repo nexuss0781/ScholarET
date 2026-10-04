@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -119,6 +120,239 @@ inline bool contains_token(const std::string& hay, const std::vector<std::string
 
 inline bool is_bullet_char(char c) noexcept {
     return c == '-' || c == '*' || c == '•' || c == '·' || c == '‣' || c == '○';
+}
+
+// ---------------------------------------------------------------------------
+// LaTeX / math reconstruction helpers
+// ---------------------------------------------------------------------------
+
+// One decoded glyph taken from the structured-text page, before spans are built.
+struct CharInfo {
+    int ucs = 0;
+    int gid = 0;
+    fz_font* font = nullptr;
+    float size = 0.0f;
+    float baseline = 0.0f;
+    fz_rect bbox = fz_empty_rect;
+};
+
+inline bool cp_is_math_symbol(int cp) {
+    switch (cp) {
+        case '=':
+        case '+':
+        case '-':
+        case 0x2212:  // minus sign
+        case 0x00D7:  // multiplication sign
+        case 0x00F7:  // division sign
+        case 0x00B1:  // plus-minus
+        case 0x2248:  // almost equal
+        case 0x2260:  // not equal
+        case 0x2264:  // less-than or equal
+        case 0x2265:  // greater-than or equal
+        case 0x221A:  // square root
+        case 0x221E:  // infinity
+        case 0x2202:  // partial differential
+        case 0x2211:  // n-ary summation
+        case 0x220F:  // n-ary product
+        case 0x222B:  // integral
+        case 0x2192:  // rightwards arrow
+        case 0x2190:  // leftwards arrow
+        case 0x21D2:  // implies
+        case 0x2208:  // element of
+        case 0x2209:  // not element of
+        case 0x2286:  // subset
+        case 0x00B0:  // degree
+        case 0x00B7:  // middle dot
+        case '^':
+        case '_':
+            return true;
+        default:
+            break;
+    }
+    // Greek and letterlike symbols (ranges), which are math by nature.
+    if (cp >= 0x0391 && cp <= 0x03C9) return true;   // Greek capitals + lowercase
+    if (cp >= 0x2200 && cp <= 0x22FF) return true;   // mathematical operators
+    if (cp >= 0x27C0 && cp <= 0x27EF) return true;   // misc mathematical symbols A
+    if (cp >= 0x2100 && cp <= 0x214F) return true;   // letterlike symbols
+    if (cp == 0x00B0 || cp == 0x2013 || cp == 0x2014) return true;
+    return false;
+}
+
+inline bool font_is_math(const std::string& font_name_lower) {
+    static const char* kTokens[] = {
+        "symbol", "math", "cmmi", "cmsy", "cmex", "cmr", "msam", "msbm",
+        "mtmi", "mt-extra", "mte", "euclid", "wasy", "stix", "asana", "xits",
+        "texgyre", "lmmi", "lmsy", "lmex", "palatino-math", "dejavu-math",
+    };
+    for (const char* t : kTokens) {
+        if (font_name_lower.find(t) != std::string::npos) return true;
+    }
+    return false;
+}
+
+inline float math_symbol_ratio(const std::string& s) {
+    if (s.empty()) return 0.0f;
+    int total = 0, sym = 0;
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char b = static_cast<unsigned char>(s[i]);
+        int cp = b;
+        int len = 1;
+        if (b >= 0xF0) { cp = b & 0x07; len = 4; }
+        else if (b >= 0xE0) { cp = b & 0x0F; len = 3; }
+        else if (b >= 0xC0) { cp = b & 0x1F; len = 2; }
+        for (int k = 1; k < len && i + static_cast<size_t>(k) < s.size(); ++k) {
+            cp = (cp << 6) | (static_cast<unsigned char>(s[i + static_cast<size_t>(k)]) & 0x3F);
+        }
+        if (cp != ' ' && cp != 0) {
+            ++total;
+            if (cp_is_math_symbol(cp)) ++sym;
+        }
+        i += static_cast<size_t>(len);
+    }
+    return total > 0 ? static_cast<float>(sym) / static_cast<float>(total) : 0.0f;
+}
+
+// True when the span reads like a standalone quantity, e.g. "15 m/s", "9.8 N/kg".
+inline bool looks_like_quantity(const std::string& s) {
+    static const std::regex re(
+        R"RX(^\(?-?[0-9]+([.,][0-9]+)?\s*(x|\^)?\s*([a-zA-Z%°]+(/[a-zA-Z]+)*)(\^[0-9]+)?\)?$)RX");
+    if (s.size() > 24) return false;
+    if (s.find_first_of("abcdefghijklmnopqrstuvwxyz") == std::string::npos) return false;
+    return std::regex_match(s, re);
+}
+
+inline bool span_looks_like_math(const std::string& text, const std::string& font_lower) {
+    if (text.empty()) return false;
+    if (font_is_math(font_lower)) return true;
+    if (text.find('=') != std::string::npos) return true;
+    if (math_symbol_ratio(text) >= 0.6f) return true;
+    if (looks_like_quantity(text)) return true;
+    return false;
+}
+
+// Map an Adobe/PostScript glyph name onto LaTeX markup. Returns empty when unknown.
+inline std::string glyph_name_to_latex(const std::string& name) {
+    if (name.empty()) return std::string();
+    if (name == "space" || name == "spacehack" || name == "softhyphen") return " ";
+
+    // uniXXXX / uXXXX[XX] style names carry the real code point.
+    if (name.size() > 3 && (name.compare(0, 3, "uni") == 0 || name[0] == 'u')) {
+        size_t start = (name[0] == 'u' && name.compare(0, 3, "uni") != 0) ? 1 : 3;
+        std::string hexpart = name.substr(start);
+        bool ok = !hexpart.empty() && hexpart.size() <= 6;
+        for (char c : hexpart) {
+            if (!std::isxdigit(static_cast<unsigned char>(c))) { ok = false; break; }
+        }
+        if (ok) {
+            unsigned int cp = static_cast<unsigned int>(std::strtoul(hexpart.c_str(), nullptr, 16));
+            if (cp > 0 && cp <= 0x10FFFF) {
+                std::string out;
+                append_utf8(out, static_cast<int>(cp));
+                return out;
+            }
+        }
+    }
+
+    struct Entry { const char* n; const char* r; };
+    static const Entry kTable[] = {
+        {"radical", "\xE2\x88\x9A"}, {"radicalex", "\xE2\x88\x9A"},
+        {"multiply", "\\times"}, {"asteriskmath", "\\cdot"},
+        {"dotmath", "\\cdot"}, {"periodcentered", "\\cdot"},
+        {"bullet", "\\cdot"}, {"divide", "\\div"},
+        {"plusminus", "\\pm"}, {"minusplus", "\\mp"},
+        {"minus", "-"}, {"endash", "-"}, {"emdash", "-"},
+        {"equal", "="}, {"equivalence", "\\equiv"},
+        {"notequal", "\\neq"}, {"approxequal", "\\approx"},
+        {"approximatelyequal", "\\approx"}, {"similar", "\\sim"},
+        {"congruent", "\\cong"}, {"propersimilar", "\\simeq"},
+        {"lessequal", "\\leq"}, {"greaterequal", "\\geq"},
+        {"lessequalequal", "\\leqq"}, {"greaterequalequal", "\\geqq"},
+        {"lessorequalslant", "\\leqslant"}, {"greaterorequalslant", "\\geqslant"},
+        {"element", "\\in"}, {"notelement", "\\notin"},
+        {"propersubset", "\\subset"}, {"reflexsubset", "\\subseteq"},
+        {"propersupset", "\\supset"}, {"reflexsuperset", "\\superseteq"},
+        {"notsubset", "\\not\\subset"},
+        {"union", "\\cup"}, {"intersection", "\\cap"},
+        {"emptyset", "\\varnothing"}, {"universal", "\\forall"},
+        {"existential", "\\exists"}, {"logicalnot", "\\neg"},
+        {"logicaland", "\\wedge"}, {"logicalor", "\\vee"},
+        {"infinity", "\\infty"}, {"partialdiff", "\\partial"},
+        {"summation", "\\sum"}, {"summationtext", "\\sum"},
+        {"summationdisplay", "\\sum"},
+        {"product", "\\prod"}, {"integral", "\\int"},
+        {"integraldisplay", "\\int"}, {"radicalbigg", "\xE2\x88\x9A"},
+        {"angleleft", "\\langle"}, {"angleright", "\\rangle"},
+        {"arrowright", "\\rightarrow"}, {"arrowleft", "\\leftarrow"},
+        {"arrowup", "\\uparrow"}, {"arrowdown", "\\downarrow"},
+        {"arrowboth", "\\leftrightarrow"},
+        {"arrowdblright", "\\Rightarrow"}, {"arrowdblleft", "\\Leftarrow"},
+        {"arrowdblboth", "\\Leftrightarrow"},
+        {"implies", "\\Rightarrow"}, {"if", "\\Rightarrow"},
+        {"degree", "^\\circ"}, {"minute", "'"}, {"second", "''"},
+        {"increment", "\\Delta"}, {"delta", "\\Delta"},
+        {"incrementalt", "\\delta"}, {"Delta", "\\Delta"},
+        {"Omega", "\\Omega"}, {"omega", "\\omega"},
+        {"perpendicular", "\\perp"}, {"parallel", "\\parallel"},
+        {"angle", "\\angle"}, {"triangle", "\\triangle"},
+        {"therefore", "\\therefore"}, {"because", "\\because"},
+        {"circleplus", "\\oplus"}, {"circlemultiply", "\\otimes"},
+        {"ellipsis", "\\ldots"}, {"emdash.", "---"},
+        {"fraction", "/"}, {"slash", "/"}, {"solidus", "/"},
+        {"period", "."}, {"comma", ","}, {"colon", ":"},
+        {"percent", "\\%"}, {"section", "\\S"}, {"paragraph", "\\P"},
+        {"dagger", "\\dagger"}, {"daggerdbl", "\\ddagger"},
+        {"numbersign", "\\#"}, {"dollar", "\\$"}, {"percentold", "\\%"},
+        {"asterisk", "*"}, {"bullet2", "\\cdot"},
+        {"summation2", "\\sum"}, {"openbullet", "\\circ"},
+        {"mho", "\\Omega"},
+    };
+    for (const Entry& e : kTable) {
+        if (name == e.n) return e.r;
+    }
+    return std::string();
+}
+
+// Turn bare radical signs into \sqrt{...} groups inside an already-math string.
+inline std::string apply_radicals(const std::string& s) {
+    const std::string kRadical = "\xE2\x88\x9A";
+    std::string out;
+    out.reserve(s.size() + 16);
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s.compare(i, kRadical.size(), kRadical) == 0) {
+            size_t j = i + kRadical.size();
+            while (j < s.size() && s[j] == ' ') ++j;
+            size_t k = j;
+            int depth = 0;
+            while (k < s.size()) {
+                char c = s[k];
+                if (c == '{' || c == '(' || c == '[') {
+                    ++depth;
+                } else if (c == '}' || c == ')' || c == ']') {
+                    if (depth == 0) break;
+                    --depth;
+                } else if (depth == 0 && (c == ',' || c == '=')) {
+                    break;
+                }
+                ++k;
+            }
+            std::string inner = trim_copy(s.substr(j, k - j));
+            if (!inner.empty()) {
+                out += "\\sqrt{";
+                out += inner;
+                out += "}";
+                i = k;
+                continue;
+            }
+            out += "\\sqrt{}";
+            i += kRadical.size();
+            continue;
+        }
+        out.push_back(s[i]);
+        ++i;
+    }
+    return out;
 }
 
 inline std::string slugify(const std::string& s) {
@@ -364,6 +598,7 @@ DocResult Extractor::process_document(const std::filesystem::path& input_path) {
     dr.output_md_path = md_out;
     dr.assets_dir = config_.assets_dir.string();
     render_markdown(dr, fs::path(md_out));
+    dump_diagnostics();
     auto t1 = std::chrono::high_resolution_clock::now();
     dr.elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
     dr.success = true;
@@ -419,29 +654,88 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                 l.baseline_y = ln->first_char ? ln->first_char->origin.y : ln->bbox.y1;
                 l.line_height = ln->bbox.y1 - ln->bbox.y0;
                 fz_stext_char* ch = ln->first_char;
+                std::vector<CharInfo> chars;
                 while (ch) {
-                    fz_font* cf = ch->font;
-                    float csz = ch->size;
-                    Span s;
-                    fz_rect sb = fz_rect_from_quad(ch->quad);
-                    std::string txt;
-                    while (ch && ch->font == cf && float_eq(ch->size, csz, 0.01f)) {
-                        append_utf8(txt, ch->c);
-                        fz_rect cr = fz_rect_from_quad(ch->quad);
-                        if (cr.x0 < sb.x0) sb.x0 = cr.x0;
-                        if (cr.y0 < sb.y0) sb.y0 = cr.y0;
-                        if (cr.x1 > sb.x1) sb.x1 = cr.x1;
-                        if (cr.y1 > sb.y1) sb.y1 = cr.y1;
-                        ch = ch->next;
+                    CharInfo ci;
+                    ci.ucs = ch->c;
+                    ci.gid = static_cast<int>(ch->gid);
+                    ci.font = ch->font;
+                    ci.size = ch->size;
+                    ci.baseline = ch->origin.y;
+                    ci.bbox = fz_rect_from_quad(ch->quad);
+                    chars.push_back(ci);
+                    ch = ch->next;
+                }
+
+                float dom_size = 0.0f;
+                float dom_base = 0.0f;
+                if (!chars.empty()) {
+                    std::vector<float> sz;
+                    sz.reserve(chars.size());
+                    for (const auto& x : chars) sz.push_back(x.size);
+                    std::sort(sz.begin(), sz.end());
+                    dom_size = sz[sz.size() / 2];
+                    std::vector<float> bl;
+                    for (const auto& x : chars) {
+                        if (std::fabs(x.size - dom_size) <= 0.05f * dom_size) bl.push_back(x.baseline);
                     }
+                    if (!bl.empty()) {
+                        std::sort(bl.begin(), bl.end());
+                        dom_base = bl[bl.size() / 2];
+                    }
+                }
+
+                auto script_of = [&](size_t idx) -> int {
+                    if (dom_size <= 0.01f) return 0;
+                    const CharInfo& x = chars[idx];
+                    float rel = x.size / dom_size;
+                    if (rel >= 0.85f) return 0;
+                    float dy = x.baseline - dom_base;
+                    if (dy < -0.15f * dom_size) return 1;
+                    if (dy > 0.08f * dom_size) return 2;
+                    // Faked superscript: smaller font sitting on the same baseline,
+                    // immediately after a non-space glyph with no horizontal gap.
+                    if (rel < 0.78f && idx > 0) {
+                        const CharInfo& p = chars[idx - 1];
+                        bool prev_nonspace = (p.ucs != ' ' && p.ucs != 0);
+                        float gap = x.bbox.x0 - p.bbox.x1;
+                        if (prev_nonspace && gap <= 0.6f) return 1;
+                    }
+                    return 0;
+                };
+
+                for (size_t ci = 0; ci < chars.size();) {
+                    const CharInfo head = chars[ci];
+                    const int script = script_of(ci);
+                    size_t cj = ci;
+                    std::string txt;
+                    fz_rect sb = head.bbox;
+                    while (cj < chars.size()) {
+                        const CharInfo& x = chars[cj];
+                        if (x.font != head.font) break;
+                        if (!float_eq(x.size, head.size, 0.01f)) break;
+                        if (script_of(cj) != script) break;
+                        if (x.ucs == 0 || x.ucs == 0xFFFD) {
+                            txt += glyph_to_latex(c, x.font, x.gid, x.ucs);
+                        } else {
+                            append_utf8(txt, x.ucs);
+                        }
+                        if (x.bbox.x0 < sb.x0) sb.x0 = x.bbox.x0;
+                        if (x.bbox.y0 < sb.y0) sb.y0 = x.bbox.y0;
+                        if (x.bbox.x1 > sb.x1) sb.x1 = x.bbox.x1;
+                        if (x.bbox.y1 > sb.y1) sb.y1 = x.bbox.y1;
+                        ++cj;
+                    }
+                    if (cj == ci) { ++ci; continue; }
+                    Span s;
                     s.text = txt;
                     s.bbox = to_rectf(sb);
-                    if (cf) {
-                        const char* fn = fz_font_name(c, cf);
+                    if (head.font) {
+                        const char* fn = fz_font_name(c, head.font);
                         if (fn) s.font_name_raw = fn;
                         s.font_family = s.font_name_raw;
                     }
-                    s.font_size = csz;
+                    s.font_size = head.size;
                     s.font_weight = 0.0f;
                     std::string fnl = to_lower_copy(s.font_name_raw);
                     s.is_bold = (fnl.find("bold") != std::string::npos);
@@ -450,9 +744,15 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     s.is_serif = (fnl.find("serif") != std::string::npos);
                     s.is_sans = (fnl.find("sans") != std::string::npos);
                     if (s.is_bold) s.font_weight *= 1.05f;
+                    s.script = script;
                     if (!s.text.empty() && s.font_size > 0.01f) {
+                        s.is_math = (script != 0) || span_looks_like_math(s.text, fnl);
+                        if (s.is_math) ++stat_math_spans_;
+                        if (script == 1) ++stat_sup_spans_;
+                        else if (script == 2) ++stat_sub_spans_;
                         l.spans.push_back(std::move(s));
                     }
+                    ci = cj;
                 }
                 if (!l.spans.empty()) {
                     lines_list.push_back(std::move(l));
@@ -794,31 +1094,35 @@ void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path
     }
     f << "---\n\n";
     for (const auto& b : dr.merged_blocks) {
-        std::string bt = block_text(b);
-        if (bt.empty()) continue;
+        std::string raw = block_text(b);
+        if (raw.empty()) continue;
+        std::string bt = render_block_text(b);
+        if (trim_copy(bt).empty()) continue;
         switch (b.type) {
             case BlockType::Title:
-                f << "# " << escape_md(bt) << "\n\n"; break;
+                f << "# " << bt << "\n\n"; break;
             case BlockType::Chapter:
-                f << "\n## " << escape_md(bt) << "\n\n"; break;
+                f << "\n## " << bt << "\n\n"; break;
             case BlockType::Section:
-                f << "\n### " << escape_md(bt) << "\n\n"; break;
+                f << "\n### " << bt << "\n\n"; break;
             case BlockType::Subsection:
-                f << "\n#### " << escape_md(bt) << "\n\n"; break;
+                f << "\n#### " << bt << "\n\n"; break;
             case BlockType::Subsubsection:
-                f << "\n##### " << escape_md(bt) << "\n\n"; break;
+                f << "\n##### " << bt << "\n\n"; break;
             case BlockType::Caption:
-                f << "_Figure: " << escape_md(bt) << "_\n\n"; break;
+                f << "_Figure: " << bt << "_\n\n"; break;
             case BlockType::ListItem:
-                f << "- " << escape_md(bt) << "\n"; break;
+                f << "- " << bt << "\n"; break;
             case BlockType::OrderedListItem:
-                f << "1. " << escape_md(bt) << "\n"; break;
+                f << "1. " << bt << "\n"; break;
             case BlockType::Code:
                 f << "```text\n" << bt << "\n```\n\n"; break;
             case BlockType::Quote:
-                f << "> " << escape_md(bt) << "\n\n"; break;
+                f << "> " << bt << "\n\n"; break;
             default:
-                f << escape_md(bt) << "\n\n"; break;
+                if (!bt.empty() && bt.back() == '\n') f << bt;
+                else f << bt << "\n\n";
+                break;
         }
     }
     f.close();
@@ -848,15 +1152,141 @@ std::string Extractor::make_stable_id(int page_num, int block_idx, const Block& 
 }
 
 std::string Extractor::escape_md(const std::string& s) {
+    return escape_md_plain(s);
+}
+
+std::string Extractor::escape_md_plain(const std::string& s) {
     std::string o;
-    o.reserve(s.size() * 2);
-    for (char c : s) {
-        if (c == '\\' || c == '`' || c == '*' || c == '_' || c == '{' || c == '}' || c == '[' || c == ']' || c == '(' || c == ')' || c == '#' || c == '+' || c == '-' || c == '.' || c == '!' || c == '|') {
-            o.push_back('\\');
+    o.reserve(s.size() + 8);
+    for (size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        // Only characters that are actually special in Markdown get escaped.
+        // Parentheses, dashes, dots, '+' and '!' are escaped nowhere: they are
+        // only structural at the very start of a line, which is handled by the
+        // block emitters, and escaping them destroyed the readability of the
+        // output (and collided with LaTeX).
+        bool esc = (c == '\\' || c == '`' || c == '*' || c == '_' ||
+                    c == '[' || c == ']' || c == '<' || c == '>' || c == '|');
+        if (!esc && i == 0) {
+            esc = (c == '#' || c == '>' );
         }
+        if (esc) o.push_back('\\');
         o.push_back(c);
     }
     return o;
+}
+
+std::string Extractor::glyph_to_latex(fz_context* c, fz_font* font, int gid, int ucs) {
+    (void)ucs;
+    const char* nm = nullptr;
+    if (font && gid >= 0) {
+        fz_try(c) {
+            nm = fz_font_glyph_name(c, font, gid);
+        } fz_catch(c) {
+            nm = nullptr;
+        }
+    }
+    std::string name = nm ? std::string(nm) : std::string();
+    note_unmapped_glyph(name.empty() ? std::string("<unnamed-gid-") + num_to_str(gid) + ">") : name);
+    std::string out = glyph_name_to_latex(name);
+    if (!out.empty()) {
+        ++stat_glyph_fixed_;
+        return out;
+    }
+    return "\xEF\xBF\xBD";
+}
+
+void Extractor::note_unmapped_glyph(const std::string& name) {
+    std::lock_guard<std::mutex> lk(diag_mutex_);
+    ++unmapped_glyphs_[name];
+}
+
+void Extractor::dump_diagnostics() const {
+    std::lock_guard<std::mutex> lk(diag_mutex_);
+    std::vector<std::pair<std::string, int>> v(unmapped_glyphs_.begin(), unmapped_glyphs_.end());
+    std::sort(v.begin(), v.end(), [](const std::pair<std::string, int>& a,
+                                     const std::pair<std::string, int>& b) {
+        return a.second > b.second;
+    });
+    std::cerr << "[SCHOLARET-DIAG] math spans: " << stat_math_spans_ << "\n";
+    std::cerr << "[SCHOLARET-DIAG] display math lines: " << stat_display_lines_ << "\n";
+    std::cerr << "[SCHOLARET-DIAG] superscript spans: " << stat_sup_spans_ << "\n";
+    std::cerr << "[SCHOLARET-DIAG] subscript spans: " << stat_sub_spans_ << "\n";
+    std::cerr << "[SCHOLARET-DIAG] glyphs recovered: " << stat_glyph_fixed_ << "\n";
+    std::cerr << "[SCHOLARET-DIAG] distinct unmapped glyph names: " << v.size() << "\n";
+    std::cerr << "[SCHOLARET-DIAG] top unmapped glyphs:";
+    size_t shown = 0;
+    for (const auto& p : v) {
+        if (shown++ >= 25) break;
+        std::cerr << " [" << p.first << "=" << p.second << "]";
+    }
+    std::cerr << "\n";
+}
+
+bool Extractor::line_is_display_math(const Line& l) {
+    if (l.spans.empty()) return false;
+    std::string all = join_spans_text(l.spans);
+    if (all.empty()) return false;
+    if (all.find('=') == std::string::npos) return false;
+    if (all.size() > 120) return false;
+    bool any_math = false;
+    for (const auto& s : l.spans) {
+        if (s.is_math) any_math = true;
+    }
+    if (!any_math) return false;
+    float r = math_symbol_ratio(all);
+    // A display equation is dominated by symbols, not prose.
+    if (r < 0.18f) return false;
+    int words = 0;
+    bool in_word = false;
+    for (char c : all) {
+        bool sp = (c == ' ');
+        if (!sp && !in_word) { ++words; in_word = true; }
+        else if (sp) in_word = false;
+    }
+    return words <= 14;
+}
+
+std::string Extractor::render_line_text(const Line& l) {
+    std::string out;
+    bool prev_math = false;
+    for (const auto& sp : l.spans) {
+        if (sp.text.empty()) continue;
+        const bool m = sp.is_math;
+        if (m != prev_math) {
+            if (!out.empty() && out.back() != ' ') out.push_back(' ');
+            out.push_back('$');
+            prev_math = m;
+        }
+        std::string piece = m ? sp.text : escape_md_plain(sp.text);
+        if (m) piece = apply_radicals(piece);
+        if (sp.script == 1) {
+            piece = "^{" + piece + "}";
+        } else if (sp.script == 2) {
+            piece = "_{" + piece + "}";
+        }
+        out += piece;
+    }
+    if (prev_math) out.push_back('$');
+    return out;
+}
+
+std::string Extractor::render_block_text(const Block& b) {
+    if (b.type == BlockType::Code) return block_text(b);
+    if (b.lines.empty()) return escape_md_plain(block_text(b));
+
+    const bool display = line_is_display_math(b.lines.front());
+    std::string out;
+    for (size_t i = 0; i < b.lines.size(); ++i) {
+        if (i) out.push_back(' ');
+        out += render_line_text(b.lines[i]);
+    }
+    if (display) {
+        std::lock_guard<std::mutex> lk(diag_mutex_);
+        ++stat_display_lines_;
+        return "$$\n" + out + "\n$$\n";
+    }
+    return out;
 }
 
 std::string Extractor::clean_text(const std::string& s) {

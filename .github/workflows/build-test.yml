@@ -44,7 +44,8 @@ jobs:
         env:
           LD_LIBRARY_PATH: /usr/local/lib
         run: |
-          ./build/extract --in data/Physics.pdf --out out_test --threads 0
+          set -o pipefail
+          ./build/extract --in data/Physics.pdf --out out_test --threads 0 2>&1 | tee extract.log
           echo "---HEAD---"
           head -40 out_test/book.md
           echo "---STATS---"
@@ -59,6 +60,27 @@ jobs:
           test "$(find out_test/assets -name '*.png' | wc -l)" -gt 0
           test "$(find out_test/assets -name '*.png' -size 0 | wc -l)" -eq 0
           file "$sample_png" | grep -Eq 'PNG image data, [0-9]+ x [0-9]+'
+
+      - name: Check LaTeX quality
+        run: |
+          echo "---DIAG---"
+          grep 'SCHOLARET-DIAG' extract.log || true
+          math_spans=$(grep -oP '(?<=math spans: )\d+' extract.log || echo 0)
+          sup_spans=$(grep -oP '(?<=superscript spans: )\d+' extract.log || echo 0)
+          glyph_fixed=$(grep -oP '(?<=glyphs recovered: )\d+' extract.log || echo 0)
+          replacement=$(grep -o $'\xef\xbf\xbd' out_test/book.md | wc -l)
+          display_math=$(grep -c '^\$\$' out_test/book.md || true)
+          echo "book.md replacement chars: $replacement"
+          echo "book.md display math lines: $((display_math / 2))"
+          echo "---LATEX SAMPLES---"
+          grep -o -E '.{0,30}\\\$\\\$.{0,90}' out_test/book.md | head -4 || true
+          grep -o -E '.{0,20}\^\{.{0,30}' out_test/book.md | head -4 || true
+          grep -o -E '.{0,20}\\\\sqrt\{.{0,40}' out_test/book.md | head -3 || true
+          test "$math_spans" -gt 100
+          test "$sup_spans" -gt 100
+          test "$glyph_fixed" -gt 20
+          test "$replacement" -eq 0
+          test "$display_math" -gt 0
 
       - name: Package output
         run: |

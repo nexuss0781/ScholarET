@@ -43,6 +43,7 @@ struct fz_document;
 struct fz_page;
 struct fz_image;
 struct fz_pixmap;
+struct fz_font;
 
 namespace scholaret {
 
@@ -72,6 +73,8 @@ struct Span {
     bool is_serif = false;
     bool is_sans = false;
     RectF bbox;
+    int script = 0;
+    bool is_math = false;
 };
 
 struct Line {
@@ -330,6 +333,13 @@ private:
     std::string make_image_filename(int page_num, int idx);
     std::string make_stable_id(int page_num, int block_idx, const Block& b);
     std::string escape_md(const std::string& s);
+    std::string escape_md_plain(const std::string& s);
+    std::string render_block_text(const Block& b);
+    std::string render_line_text(const Line& l);
+    bool line_is_display_math(const Line& l);
+    std::string glyph_to_latex(fz_context* c, fz_font* font, int gid, int ucs);
+    void note_unmapped_glyph(const std::string& name);
+    void dump_diagnostics() const;
     std::string clean_text(const std::string& s);
     std::string normalize_whitespace(const std::string& s);
     std::string join_spans_text(const std::vector<Span>& spans);
@@ -347,6 +357,14 @@ private:
     
     void ensure_directories();
     std::vector<std::string> read_batch_list(const std::filesystem::path& list_path);
+
+    mutable std::mutex diag_mutex_;
+    std::map<std::string, int> unmapped_glyphs_;
+    size_t stat_sup_spans_ = 0;
+    size_t stat_sub_spans_ = 0;
+    size_t stat_math_spans_ = 0;
+    size_t stat_display_lines_ = 0;
+    size_t stat_glyph_fixed_ = 0;
 };
 
 } // namespace scholaret
