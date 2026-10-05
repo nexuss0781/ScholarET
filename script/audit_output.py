@@ -170,14 +170,16 @@ def main():
     p("-- LaTeX syntax " + "-" * 49)
     p(f"double backslash {raw.count(chr(92) + chr(92)):,}   (\\times written as \\\\times)")
     p(f"escaped parens   {len(re.findall(chr(92) + r'[(]', raw)):,}   (\\( is not math)")
-    p(f"empty scripts    {len(re.findall(r'[\^_]\\{\\}', raw)):,}   (^{} or _{})")
+    empty_scripts = len(re.findall(r"[\^_]\{\}", raw))
+    p(f"empty scripts    {empty_scripts:,}   (a superscript or subscript with no body)")
     cmds = Counter(re.findall(r"\\([A-Za-z]+)", raw))
     p(f"commands used    {dict(cmds.most_common(12))}")
     for name in ("times", "sqrt", "cdot", "pm", "leq", "geq", "neq", "approx", "int", "partial"):
         p(f"  \\{name:<10} {cmds.get(name, 0):,}")
     p(f"superscripts     {len(re.findall(chr(94) + r'[{][^{}]{0,12}[}]', raw)):,}")
     p(f"subscripts       {len(re.findall(chr(95) + r'[{][^{}]{0,12}[}]', raw)):,}")
-    p(f"sqrt groups      {len(re.findall(chr(92) + r'sqrt{', raw)):,}")
+    sqrt_groups = len(re.findall(r"sqrt\{", raw))
+    p(f"sqrt groups      {sqrt_groups:,}")
     findings.append(("double backslashes", raw.count(chr(92) + chr(92)), True))
 
     # --------------------------------------------------------- unbalanced $
