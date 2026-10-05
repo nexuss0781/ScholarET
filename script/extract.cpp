@@ -433,17 +433,31 @@ inline std::string separate_latex_commands(const std::string& s) {
     size_t i = 0;
     while (i < s.size()) {
         if (s[i] == '\\') {
+            // Greedy scan collects "timesP" as one name, which matches nothing in
+            // kCmds. The name is the longest known command that is a prefix of that
+            // run: for "\timesP" that is "times", leaving P as the next character.
             size_t j = i + 1;
             while (j < s.size() && std::isalpha(static_cast<unsigned char>(s[j]))) ++j;
-            const std::string name = s.substr(i + 1, j - i - 1);
-            bool known = false;
+            const size_t run_end = j;
+            size_t cmd_len = 0;
             for (const char* c : kCmds) {
-                if (name == c) { known = true; break; }
+                const size_t n = std::strlen(c);
+                if (n <= run_end - (i + 1) &&
+                    s.compare(i + 1, n, c) == 0 && n > cmd_len) {
+                    cmd_len = n;
+                }
             }
-            out += s.substr(i, j - i);
-            i = j;
-            if (known && i < s.size() && std::isalpha(static_cast<unsigned char>(s[i]))) {
-                out.push_back(' ');
+            if (cmd_len == 0) {            // not a command we emit: copy verbatim
+                out += s.substr(i, run_end - i);
+                i = run_end;
+                continue;
+            }
+            // cmd_len counts the name only; the backslash is a separate
+            // character, so the consumed length is cmd_len + 1.
+            out += s.substr(i, cmd_len + 1);
+            i += cmd_len + 1;
+            if (i < s.size() && std::isalpha(static_cast<unsigned char>(s[i]))) {
+                out.push_back(' ');         // terminate the control sequence
             }
             continue;
         }

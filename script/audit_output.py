@@ -231,7 +231,7 @@ def main():
         r"\\(?:times|sqrt|cdot|div|pm|mp|leq|geq|neq|approx|sim|int|sum|prod)"
         r"[A-Za-z]", raw))
     p(f"math glued to text {glued:,}   (\\timesPpascal: missing space after math)")
-    for g in re.findall(r".{0,10}\\(?:times|sqrt|cdot)[A-Za-z]{2,}.{0,14}", raw)[:n]:
+    for g in re.findall(r".{0,24}\\\\??\\?(?:times|sqrt|cdot)[A-Za-z].{0,24}", raw)[:n]:
         p(f"  {g}")
     for name in ("times", "sqrt", "cdot", "pm", "leq", "geq", "neq", "approx", "int", "partial"):
         p(f"  \\{name:<10} {cmds.get(name, 0):,}")
