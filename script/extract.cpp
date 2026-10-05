@@ -127,6 +127,31 @@ inline bool is_bullet_char(char c) noexcept {
 // ---------------------------------------------------------------------------
 
 // One decoded glyph taken from the structured-text page, before spans are built.
+// Count ordinary English-looking words: runs of letters, at least two long.
+// Units such as "m" or "s" do not count, which is what separates "at 3.0 m from
+// O" from "25 m/s x 0.6".
+inline int wordlike_count(const std::string& t) {
+    int n = 0;
+    size_t i = 0;
+    while (i < t.size()) {
+        if (std::isalpha(static_cast<unsigned char>(t[i]))) {
+            size_t j = i;
+            while (j < t.size() && std::isalpha(static_cast<unsigned char>(t[j]))) ++j;
+            if (j - i >= 2) ++n;
+            i = j;
+        } else {
+            ++i;
+        }
+    }
+    return n;
+}
+
+// A span with real words in it is prose that happens to contain an operator,
+// not an equation. Equations carry units and symbols, not verbs.
+inline bool span_looks_like_prose(const std::string& t) {
+    return wordlike_count(t) >= 3;
+}
+
 struct CharInfo {
     int ucs = 0;
     int gid = 0;
