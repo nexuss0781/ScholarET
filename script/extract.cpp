@@ -967,6 +967,19 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         ++cj;
                     }
                     if (cj == ci) { ++ci; continue; }
+                    if (script != 0) {
+                        // MuPDF inserts a space wherever the gap between two glyphs
+                        // crosses its width threshold, and a tight subscript trips
+                        // that: "fluid" came out as "f luid" and "obj" as "ob j".
+                        // Real superscripts and subscripts are never word-spaced,
+                        // so the spaces are spurious.
+                        std::string tight;
+                        tight.reserve(txt.size());
+                        for (char c2 : txt) {
+                            if (c2 != ' ' && c2 != '\t') tight.push_back(c2);
+                        }
+                        txt = tight;
+                    }
                     Span s;
                     s.text = txt;
                     s.bbox = to_rectf(sb);
@@ -1052,6 +1065,27 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                     ci = cj;
                 }
                 if (!l.spans.empty()) {
+                    // Whole-line dump: with per-span hits alone there is no way to
+                    // tell a missing tail from a misclassified neighbour.
+                    {
+                        const char* pat = std::getenv("SCHOLARET_TRACE_LINES");
+                        if (pat && *pat) {
+                            const std::string p2(pat);
+                            bool hit = false;
+                            for (const auto& sp : l.spans) {
+                                if (sp.text.find(p2) != std::string::npos) { hit = true; break; }
+                            }
+                            if (hit) {
+                                std::cerr << "[LINETRACE] hit=" << p2;
+                                for (const auto& sp : l.spans) {
+                                    std::cerr << " {" << (sp.is_math ? "$" : "t")
+                                              << (sp.script == 1 ? "^" : sp.script == 2 ? "_" : "")
+                                              << sp.text << "}";
+                                }
+                                std::cerr << "\n";
+                            }
+                        }
+                    }
                     lines_list.push_back(std::move(l));
                 }
                 ln = ln->next;
