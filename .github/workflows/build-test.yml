@@ -43,6 +43,7 @@ jobs:
       - name: Extract
         env:
           LD_LIBRARY_PATH: /usr/local/lib
+          SCHOLARET_TRACE_SPANS: ${{ vars.SCHOLARET_TRACE_SPANS || 'gauge|luid|ob|Pamt|rho' }}
         run: |
           set -o pipefail
           ./build/extract --in data/Physics.pdf --out out_test --threads 0 2>&1 | tee extract.log

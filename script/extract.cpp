@@ -1013,6 +1013,27 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                             }
                         }
                         if (s.is_math) ++stat_math_spans_;
+                        // Span-level trace for a pattern, enabled with
+                        // SCHOLARET_TRACE_SPANS="gauge|obj|Pamt". Answers "why is
+                        // this subscript split" without needing the artifact
+                        // locally.
+                        {
+                            const char* pat = std::getenv("SCHOLARET_TRACE_SPANS");
+                            if (pat && *pat) {
+                                const std::string p2(pat);
+                                const size_t bp = ci < cj - 1 ? ci : 0;
+                                (void)bp;
+                                const std::string& probe = txt;
+                                if (probe.find(p2) != std::string::npos) {
+                                    std::cerr << "[SPANTRACE] pattern=" << p2
+                                              << " script=" << script
+                                              << " size=" << s.font_size
+                                              << " math=" << (s.is_math ? 1 : 0)
+                                              << " rule=" << rule
+                                              << " text=[" << probe << "]\n";
+                                }
+                            }
+                        }
                         if (script == 1) ++stat_sup_spans_;
                         else if (script == 2) ++stat_sub_spans_;
                         l.spans.push_back(std::move(s));
