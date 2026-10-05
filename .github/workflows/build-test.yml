@@ -27,6 +27,9 @@ jobs:
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
+      - name: Probe font API
+        run: |
+          grep -hE '^[a-z_ ]*\*?fz_[a-z_0-9]+\(' /usr/local/include/mupdf/fitz/font.h || true
       - name: Build
         env:
           PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
@@ -111,7 +114,7 @@ jobs:
           echo "[math spans]"
           grep -oE '.{0,18}\$[^$]{1,40}\$' out_test/book.md | head -5 || true
           echo "[unmapped glyph context]"
-          grep -E '^\s+gid=' extract.log | sort | uniq -c | sort -rn | head -30 || true
+          grep -E '^\s+code=' extract.log | sort | uniq -c | sort -rn | head -30 || true
           test "$math_spans" -gt 100
           test "$sup_spans" -gt 100
           test "$sub_spans" -gt 100

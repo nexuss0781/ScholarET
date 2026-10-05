@@ -4,6 +4,7 @@
 #include <mupdf/pdf.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -348,6 +349,33 @@ inline std::string unicode_to_latex(int cp, bool* is_math_repl) {
     }
     *is_math_repl = false;
     return std::string();
+}
+
+// Diagnostic only: list the unicodes whose glyph id matches, so we can tell a
+// real gid from a raw character code before trusting any recovery.
+inline std::string glyph_sweep_matches(fz_context* ctx, fz_font* font, int gid) {
+    if (!ctx || !font || gid <= 0) return std::string();
+    static const int kRanges[][2] = {
+        {0x20, 0x7E}, {0xA0, 0xFF}, {0x386, 0x3C9}, {0x2013, 0x201D},
+        {0x2190, 0x22FF}, {0x00BC, 0x00BE},
+    };
+    std::string out;
+    int shown = 0;
+    for (const auto& r : kRanges) {
+        for (int u = r[0]; u <= r[1]; ++u) {
+            if (u == 0xFFFD) continue;
+            if (fz_encode_character(ctx, font, u) != gid) continue;
+            if (shown < 4) {
+                if (!out.empty()) out += ",";
+                char b[16];
+                std::snprintf(b, sizeof(b), "U+%04X", u);
+                out += b;
+                ++shown;
+            }
+        }
+    }
+    if (out.empty()) return "none";
+    return out;
 }
 
 // Recover what an undecodable glyph actually is.
@@ -802,10 +830,12 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                 for (size_t i = 0; i < chars.size(); ++i) {
                     if (chars[i].ucs != 0xFFFD && chars[i].ucs != 0) continue;
                     note_unmapped_glyph(
-                        "gid=" + num_to_str(chars[i].unmapped_code) +
-                        (chars[i].unmapped_name.empty()
-                             ? std::string()
-                             : " name=" + chars[i].unmapped_name) +
+                        "code=" + num_to_str(chars[i].unmapped_code) +
+                        " name=" + (chars[i].unmapped_name.empty()
+                                        ? std::string("<empty>")
+                                        : chars[i].unmapped_name) +
+                        " enc=" + glyph_sweep_matches(c, chars[i].font,
+                                                      chars[i].unmapped_code) +
                         " ctx=" + char_context(chars, chars[i], i));
                 }
 
