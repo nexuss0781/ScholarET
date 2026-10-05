@@ -1473,7 +1473,11 @@ void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path
     for (const auto& b : dr.merged_blocks) {
         std::string raw = block_text(b);
         if (raw.empty()) continue;
-        std::string bt = render_block_text(b);
+        // Every block, whatever path built it, passes through here. Doing the
+        // separation here rather than inside render_line_text also covers the
+        // block_text fallbacks, and block_text stays free of "$" delimiters so
+        // that TOC titles, slugs and dedup keys are unaffected.
+        std::string bt = separate_latex_commands(render_block_text(b));
         if (trim_copy(bt).empty()) continue;
         switch (b.type) {
             case BlockType::Title:
@@ -1616,10 +1620,7 @@ std::string Extractor::render_line_text(const Line& l) {
         out += piece;
     }
     if (prev_math) out.push_back('$');
-    // Run this over the assembled line, not per span: the fusion happens *across*
-    // span boundaries, where "\times" ends one math span and "Ppascal" begins the
-    // next with no delimiter between them.
-    return separate_latex_commands(out);
+    return out;
 }
 
 std::string Extractor::render_block_text(const Block& b) {
