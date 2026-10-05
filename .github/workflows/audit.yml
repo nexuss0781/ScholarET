@@ -57,11 +57,24 @@ jobs:
             echo "ok=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Unpack
+        if: steps.fetch.outputs.ok == 'true'
+        run: |
+          set -o pipefail
+          echo "artifact contents:"
+          find sample -type f | sed -n '1,12p'
+          # The artifact carries the packaged zip rather than loose files.
+          for z in $(find sample -name '*.zip'); do
+            echo "unpacking $z"
+            unzip -q -o "$z" -d unpacked
+          done
+          find sample unpacked -name book.md -print 2>/dev/null || true
+
       - name: Audit book.md
         if: steps.fetch.outputs.ok == 'true'
         run: |
           set -o pipefail
-          md=$(find sample -name book.md -print -quit)
+          md=$(find sample unpacked -name book.md -print -quit 2>/dev/null || true)
           if [ -z "$md" ]; then
             echo "::error::book.md missing from artifact"
             exit 1
