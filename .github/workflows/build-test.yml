@@ -43,8 +43,6 @@ jobs:
       - name: Extract
         env:
           LD_LIBRARY_PATH: /usr/local/lib
-          SCHOLARET_TRACE_SPANS: ${{ ${SCHOLARET_TRACE_SPANS} }}
-          SCHOLARET_TRACE_LINES: ${{ ${SCHOLARET_TRACE_LINES} }}
         run: |
           set -o pipefail
           ./build/extract --in data/Physics.pdf --out out_test --threads 0 2>&1 | tee extract.log
