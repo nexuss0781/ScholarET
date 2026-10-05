@@ -27,9 +27,6 @@ jobs:
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
-      - name: Probe font API
-        run: |
-          grep -hnE 'glyph|unicode' /usr/local/include/mupdf/fitz/font.h | grep -E 'fz_[a-z_]+\(' || true
       - name: Build
         env:
           PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
@@ -122,6 +119,6 @@ jobs:
           # Glyphs we cannot name are kept as U+FFFD on purpose: guessing their
           # encoding produced wrong characters (a solidus turned into a pilcrow).
           # This bound only catches a regression that starts dropping far more
-          # text; the real work is driving it to zero via unmapped_code_to_latex.
+          # text; the real work is naming every remaining glyph via resolve_glyph().
           test "$replacement" -ge 0
           test "$replacement" -lt 200
