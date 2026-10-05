@@ -1020,12 +1020,21 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         {
                             const char* pat = std::getenv("SCHOLARET_TRACE_SPANS");
                             if (pat && *pat) {
-                                const std::string p2(pat);
-                                const size_t bp = ci < cj - 1 ? ci : 0;
-                                (void)bp;
-                                const std::string& probe = txt;
-                                if (probe.find(p2) != std::string::npos) {
-                                    std::cerr << "[SPANTRACE] pattern=" << p2
+                                // "a|b|c" means any of a, b or c, not a literal.
+                                std::string p2 = pat;
+                                std::string best;
+                                for (size_t a = 0; a <= p2.size(); ++a) {
+                                    if (a != p2.size() && p2[a] != '|') continue;
+                                    const std::string alt = p2.substr(0, a);
+                                    p2.erase(0, a + (a < p2.size() ? 1 : 0));
+                                    a = (size_t)-1;
+                                    if (alt.empty()) continue;
+                                    if (txt.find(alt) != std::string::npos && alt.size() > best.size()) {
+                                        best = alt;
+                                    }
+                                }
+                                if (!best.empty()) {
+                                    std::cerr << "[SPANTRACE] hit=" << best
                                               << " script=" << script
                                               << " size=" << s.font_size
                                               << " math=" << (s.is_math ? 1 : 0)
