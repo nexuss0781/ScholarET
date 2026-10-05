@@ -1039,7 +1039,7 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                                               << " size=" << s.font_size
                                               << " math=" << (s.is_math ? 1 : 0)
                                               << " rule=" << rule
-                                              << " text=[" << probe << "]\n";
+                                              << " text=[" << txt << "]\n";
                                 }
                             }
                         }
