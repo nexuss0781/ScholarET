@@ -1072,9 +1072,12 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         if (pat && *pat) {
                             const std::string p2(pat);
                             bool hit = false;
-                            for (const auto& sp : l.spans) {
-                                if (sp.text.find(p2) != std::string::npos) { hit = true; break; }
-                            }
+                            std::string joined;
+                            for (const auto& sp : l.spans) joined += sp.text;
+                            // Match on the concatenation: a pattern like "P_{2}"
+                            // never appears in a single span, because the script
+                            // is a separate span.
+                            if (joined.find(p2) != std::string::npos) hit = true;
                             if (hit) {
                                 std::cerr << "[LINETRACE] hit=" << p2;
                                 for (const auto& sp : l.spans) {
