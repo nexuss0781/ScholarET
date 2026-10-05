@@ -1607,8 +1607,7 @@ std::string Extractor::render_line_text(const Line& l) {
             out.push_back('$');
             prev_math = m;
         }
-        std::string piece = m ? sp.text : escape_md_plain(sp.text);
-        if (m) piece = separate_latex_commands(apply_radicals(piece));
+        std::string piece = m ? apply_radicals(sp.text) : escape_md_plain(sp.text);
         if (sp.script == 1) {
             piece = "^{" + piece + "}";
         } else if (sp.script == 2) {
@@ -1617,7 +1616,10 @@ std::string Extractor::render_line_text(const Line& l) {
         out += piece;
     }
     if (prev_math) out.push_back('$');
-    return out;
+    // Run this over the assembled line, not per span: the fusion happens *across*
+    // span boundaries, where "\times" ends one math span and "Ppascal" begins the
+    // next with no delimiter between them.
+    return separate_latex_commands(out);
 }
 
 std::string Extractor::render_block_text(const Block& b) {
