@@ -1,0 +1,78 @@
+name: Audit output
+
+# A separate workflow so that measuring output quality never slows down or
+# blocks the build. It audits the artifact of a finished build run and reports
+# what is actually wrong with the Markdown, rather than just counting features.
+
+on:
+  workflow_run:
+    workflows: ["Build and Test"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Workflow run id to audit (defaults to the triggering run)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target run
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ inputs.run_id }}" ]; then
+            echo "id=${{ inputs.run_id }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.workflow_run.conclusion }}" = "success" ]; then
+            echo "id=${{ github.event.workflow_run.id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "skipping: triggering run concluded ${{ github.event.workflow_run.conclusion }}" >&2
+            echo "id=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout audit script
+        if: steps.target.outputs.id != ''
+        uses: actions/checkout@v4
+
+      - name: Download extracted sample
+        id: fetch
+        if: steps.target.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.target.outputs.id }}
+        run: |
+          mkdir -p sample
+          if gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+               --name scholar-extract-sample --dir sample; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::run $RUN_ID has no scholar-extract-sample artifact"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Audit book.md
+        if: steps.fetch.outputs.ok == 'true'
+        run: |
+          set -o pipefail
+          md=$(find sample -name book.md -print -quit)
+          if [ -z "$md" ]; then
+            echo "::error::book.md missing from artifact"
+            exit 1
+          fi
+          echo "auditing $md"
+          python3 script/audit_output.py "$md" --sample-lines 8 | tee audit.txt
+
+      - name: Upload audit report
+        if: always() && steps.fetch.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report
+          path: audit.txt
+          if-no-files-found: warn
