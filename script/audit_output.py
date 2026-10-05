@@ -43,17 +43,26 @@ def words(text):
     return re.findall(r"[^\s]+", text)
 
 
+PUNCT = "\ufffd\u00d7\u00f7\u00b1\u2212\u00b0\u0394\u03b1\u03b2\u03c1\u03c9\u03c6\u03b8\u03a9\u221e\u2264\u2265\u2248\u2260$()[]{}<>|+-*/^_=,;:.&%!?"
+
+
 def prose_words(text):
     """Tokens that are neither units nor LaTeX command names.
 
     Counting these rather than all tokens is what keeps
     "omega_o = 6 rad/s, alpha = 3 rad/s^2" from being reported as prose.
+    Subscript and superscript groups are dropped first: "rho_fluid gV_disp" is
+    an equation, and the group contents are what used to tip it over the limit.
     """
+    text = re.sub(r"[_^]\{[^{}]*\}", " ", text)   # script groups
+    text = re.sub(r"\\[A-Za-z]+\s*(\{[^{}]*\})?", " ", text)  # commands
     out = []
     for tok in words(text):
-        bare = tok.strip("$()[]{}.,;:")
+        bare = tok.strip(PUNCT)
         if not bare:
             continue
+        if not re.search(r"[A-Za-z]", bare):
+            continue          # pure symbols or numbers: not words at all
         if bare.startswith("\\"):        # a LaTeX command
             continue
         low = bare.lower()
@@ -165,6 +174,19 @@ def main():
         text = lines[ln - 1]
         i = text.index(REPLACEMENT)
         p(f"  L{ln}: ...{text[max(0, i - 45):i + 45]}...")
+    # A subscript or superscript group whose contents contain a space is a
+    # segmentation fault: MuPDF injects a space at a glyph gap and "fluid" comes
+    # out as "f luid". Real scripts are never word-spaced.
+    split_scripts = len(re.findall(r"[_^]\{[^}]*[ ][^}]*\}", raw))
+    p(f"script groups containing a space  {split_scripts:,}")
+    findings.append(("script groups containing a space", split_scripts, True))
+
+    # A superscript or subscript with no content at all, "^{ }", is a blank
+    # span that survived classification.
+    empty_scripts = len(re.findall(r"[_^]\{\s*\}", raw))
+    p(f"empty script groups              {empty_scripts:,}")
+    findings.append(("empty script groups", empty_scripts, True))
+
     findings.append(("U+FFFD glyphs", repl_total, True))
 
     # ------------------------------------------------- prose inside $...$
