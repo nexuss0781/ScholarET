@@ -22,6 +22,17 @@ REPLACEMENT = "�"
 
 # A $...$ span holding this many words is prose, not an equation.
 PROSE_WORDS = 5
+# Measurement units and function-like tokens. They are letters, so a naive word
+# count treats "6 rad/s" as prose; an equation is mostly units and symbols.
+UNITS = {
+    "m", "s", "kg", "g", "n", "pa", "j", "w", "v", "a", "c", "f", "h",
+    "rad", "sec", "rev", "min", "hr", "hz", "khz", "mhz", "ghz",
+    "cm", "mm", "km", "nm", "um", "in", "ft", "yd", "mi",
+    "n", "kn", "mn", "mev", "gev", "kev", "ev",
+    "mol", "k", "l", "ml", "t", "b", "bpm",
+    "sin", "cos", "tan", "log", "ln", "exp", "lim", "max", "min",
+    "left", "right", "deg", "sqrt", "cdot", "times", "pm", "approx",
+}
 # A $$ block holding this many words is prose, not a display equation.
 DISPLAY_PROSE_WORDS = 8
 # A link label this long is a whole page, not a heading.
@@ -30,6 +41,32 @@ ANCHOR_LABEL_CHARS = 200
 
 def words(text):
     return re.findall(r"[^\s]+", text)
+
+
+def prose_words(text):
+    """Tokens that are neither units nor LaTeX command names.
+
+    Counting these rather than all tokens is what keeps
+    "omega_o = 6 rad/s, alpha = 3 rad/s^2" from being reported as prose.
+    """
+    out = []
+    for tok in words(text):
+        bare = tok.strip("$()[]{}.,;:")
+        if not bare:
+            continue
+        if bare.startswith("\\"):        # a LaTeX command
+            continue
+        low = bare.lower()
+        if low in UNITS:
+            continue
+        if re.fullmatch(r"[a-z]{1,2}", low):   # single-letter variables: m, s, v
+            continue
+        if re.fullmatch(r"[A-Za-z]\d*", bare):  # v2, m3, A1
+            continue
+        if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", bare):
+            continue
+        out.append(bare)
+    return out
 
 
 def inline_math(text):
@@ -139,22 +176,23 @@ def main():
             continue
         for s in inline_math(l):
             spans.append((i, s))
-    long_spans = [(i, s) for i, s in spans if len(words(s)) >= PROSE_WORDS]
+    long_spans = [(i, s) for i, s in spans if len(prose_words(s)) >= PROSE_WORDS]
     p(f"inline spans     {len(spans):,}")
-    p(f"spans >={PROSE_WORDS} words  {len(long_spans):,}  ({100.0 * len(long_spans) / max(1, len(spans)):.1f}%)")
+    p(f"spans >={PROSE_WORDS} prose words {len(long_spans):,}  ({100.0 * len(long_spans) / max(1, len(spans)):.1f}%)")
     for i, s in long_spans[:n]:
         p(f"  L{i}: ${s[:100]}$")
     findings.append((f"inline spans with >={PROSE_WORDS} words", len(long_spans), False))
 
-    longest = sorted(spans, key=lambda t: -len(words(t[1])))[:n]
+    longest = sorted(spans, key=lambda t: -len(prose_words(t[1])))[:n]
     for i, s in longest:
-        p(f"  longest L{i} ({len(words(s))} words): ${s[:120]}$")
+        p(f"  longest L{i} ({len(prose_words(s))} prose words): ${s[:120]}$")
 
     # --------------------------------------------- prose inside $$ ... $$
     p()
     p("-- display math blocks " + "-" * 45)
     blocks = list(display_blocks(lines))
-    prose_blocks = [(ln, b) for ln, b in blocks if len(words(" ".join(b))) >= DISPLAY_PROSE_WORDS]
+    prose_blocks = [(ln, b) for ln, b in blocks
+                    if len(prose_words(" ".join(b))) >= DISPLAY_PROSE_WORDS]
     empty_blocks = [(ln, b) for ln, b in blocks if not " ".join(b).strip()]
     p(f"blocks           {len(blocks):,}")
     p(f"prose blocks     {len(prose_blocks):,}  (>={DISPLAY_PROSE_WORDS} words)")
@@ -187,7 +225,11 @@ def main():
     # "\timesPpascal" is really "\times" glued to the variable Ppascal: the span
     # boundary lost its separating space. Count the cases where a command runs
     # straight into following letters.
-    glued = len(re.findall(r"\\(?:times|sqrt|cdot|pm|neq|approx|leq|geq)[A-Za-z]{2,}", raw))
+    # A single trailing letter is enough to fuse: \timesP is one control
+    # sequence, so the earlier {2,} threshold missed the four real cases.
+    glued = len(re.findall(
+        r"\\(?:times|sqrt|cdot|div|pm|mp|leq|geq|neq|approx|sim|int|sum|prod)"
+        r"[A-Za-z]", raw))
     p(f"math glued to text {glued:,}   (\\timesPpascal: missing space after math)")
     for g in re.findall(r".{0,10}\\(?:times|sqrt|cdot)[A-Za-z]{2,}.{0,14}", raw)[:n]:
         p(f"  {g}")
@@ -199,6 +241,7 @@ def main():
     sqrt_groups = len(re.findall(r"sqrt\{", raw))
     p(f"sqrt groups      {sqrt_groups:,}")
     findings.append(("double backslashes", raw.count(chr(92) + chr(92)), True))
+    findings.append(("LaTeX commands fused with text", glued, True))
 
     # --------------------------------------------------------- unbalanced $
     p()
@@ -254,6 +297,43 @@ def main():
     p(f"non-ascii chars     {sum(1 for ch in raw if ord(ch) > 127):,}")
 
     # ---------------------------------------------------------- verdict
+    # ------------------------------------------------- reading order sanity
+    # A two-column page extracted in visual order interleaves the columns: a
+    # sentence start from the left column lands between two fragments of the
+    # right. That shows up as paragraphs that begin mid-thought and as words
+    # split across a line boundary. Both are cheap proxies, and both are absent
+    # from a correct single-column reading.
+    p()
+    p("-- reading order " + "-" * 50)
+    starts_mid = 0
+    mid_samples = []
+    for i, l in enumerate(lines):
+        t = l.strip().lstrip("-*+ ").lstrip("$").strip()
+        if not t or t.startswith("#") or t.startswith("!") or t.startswith("|"):
+            continue
+        first = re.split(r"[\s]", t, 1)[0]
+        # A sentence continuing in lower case, or a lone capitalised letter that
+        # is followed by more words, suggests columns were interleaved.
+        if re.fullmatch(r"[a-z]{2,}", first) and i > 0 and lines[i - 1].strip().endswith((".", ":", ";")):
+            starts_mid += 1
+            if len(mid_samples) < n:
+                mid_samples.append((i + 1, l[:100]))
+    p(f"paragraphs starting mid-sentence  {starts_mid:,}")
+    for ln, t in mid_samples:
+        p(f"  L{ln}: {t}")
+    hyphen_break = len(re.findall(r"\b[A-Za-z]{2,}-\n[a-z]{2,}\b", raw))
+    p(f"words split across lines         {hyphen_break:,}")
+    dup_para = 0
+    seen_para = {}
+    for l in lines:
+        k = re.sub(r"\s+", " ", l.strip()).lower()
+        if len(k) < 60:
+            continue
+        seen_para[k] = seen_para.get(k, 0) + 1
+    dup_para = sum(v - 1 for v in seen_para.values() if v > 1)
+    p(f"duplicated paragraphs            {dup_para:,}")
+    findings.append(("paragraphs starting mid-sentence", starts_mid, False))
+
     p()
     p("=" * 72)
     p("SUMMARY (count, expected = 0 unless noted)")

@@ -413,6 +413,46 @@ inline GlyphGuess resolve_glyph(fz_context* ctx, fz_font* font, int gid) {
     return out;
 }
 
+// Keep LaTeX commands from fusing with the text that follows them.
+//
+// "\timesP" is a single control sequence named "timesP", not "\times" followed
+// by P, so a renderer either errors or prints the literal text. A space ends the
+// command name and is invisible in math mode. Only needed when the very next
+// character is a letter, and only for the commands this file emits.
+inline std::string separate_latex_commands(const std::string& s) {
+    static const char* const kCmds[] = {
+        "times", "div", "pm", "mp", "leq", "geq", "neq", "approx", "sim",
+        "infty", "partial", "prod", "sum", "int", "cdot", "times",
+        "langle", "rangle", "rightarrow", "leftarrow", "leftrightarrow",
+        "varnothing", "forall", "exists", "neg", "wedge", "vee",
+        "oplus", "otimes", "ldots", "dagger", "ddagger", "angle",
+        "triangle", "therefore", "because", "sqrt",
+    };
+    std::string out;
+    out.reserve(s.size() + 8);
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] == '\\') {
+            size_t j = i + 1;
+            while (j < s.size() && std::isalpha(static_cast<unsigned char>(s[j]))) ++j;
+            const std::string name = s.substr(i + 1, j - i - 1);
+            bool known = false;
+            for (const char* c : kCmds) {
+                if (name == c) { known = true; break; }
+            }
+            out += s.substr(i, j - i);
+            i = j;
+            if (known && i < s.size() && std::isalpha(static_cast<unsigned char>(s[i]))) {
+                out.push_back(' ');
+            }
+            continue;
+        }
+        out.push_back(s[i]);
+        ++i;
+    }
+    return out;
+}
+
 // Turn bare radical signs into \sqrt{...} groups inside an already-math string.
 inline std::string apply_radicals(const std::string& s) {
     const std::string kRadical = "\xE2\x88\x9A";
@@ -1568,7 +1608,7 @@ std::string Extractor::render_line_text(const Line& l) {
             prev_math = m;
         }
         std::string piece = m ? sp.text : escape_md_plain(sp.text);
-        if (m) piece = apply_radicals(piece);
+        if (m) piece = separate_latex_commands(apply_radicals(piece));
         if (sp.script == 1) {
             piece = "^{" + piece + "}";
         } else if (sp.script == 2) {
