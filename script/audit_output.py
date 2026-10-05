@@ -173,11 +173,28 @@ def main():
     p(f"escaped parens   {escaped_parens:,}   (a literal backslash-paren, which is not math)")
     empty_scripts = len(re.findall(r"[\^_]\{\}", raw))
     p(f"empty scripts    {empty_scripts:,}   (a superscript or subscript with no body)")
+    KNOWN = ("times", "sqrt", "cdot", "pm", "mp", "leq", "geq", "neq", "approx",
+             "sim", "int", "partial", "prod", "sum", "infty", "pm", "langle",
+             "rangle", "rightarrow", "leftarrow", "to", "alpha", "beta", "gamma",
+             "theta", "lambda", "mu", "rho", "sigma", "omega", "Delta", "Omega",
+             "varnothing", "forall", "exists", "neg", "wedge", "vee", "oplus",
+             "otimes", "ldots", "dagger", "angle", "triangle", "therefore",
+             "because", "circ", "ell", "quad", "qquad")
     cmds = Counter(re.findall(r"\\([A-Za-z]+)", raw))
     p(f"commands used    {dict(cmds.most_common(12))}")
+    unknown = {k: v for k, v in cmds.items() if k not in KNOWN}
+    p(f"unknown commands {unknown if unknown else 'none'}")
+    # "\timesPpascal" is really "\times" glued to the variable Ppascal: the span
+    # boundary lost its separating space. Count the cases where a command runs
+    # straight into following letters.
+    glued = len(re.findall(r"\\(?:times|sqrt|cdot|pm|neq|approx|leq|geq)[A-Za-z]{2,}", raw))
+    p(f"math glued to text {glued:,}   (\\timesPpascal: missing space after math)")
+    for g in re.findall(r".{0,10}\\(?:times|sqrt|cdot)[A-Za-z]{2,}.{0,14}", raw)[:n]:
+        p(f"  {g}")
     for name in ("times", "sqrt", "cdot", "pm", "leq", "geq", "neq", "approx", "int", "partial"):
         p(f"  \\{name:<10} {cmds.get(name, 0):,}")
-    p(f"superscripts     {len(re.findall(chr(94) + r'[{][^{}]{0,12}[}]', raw)):,}")
+    supers = len(re.findall(re.escape("^") + r"\{[^{}]{0,12}\}", raw))
+    p(f"superscripts     {supers:,}")
     p(f"subscripts       {len(re.findall(chr(95) + r'[{][^{}]{0,12}[}]', raw)):,}")
     sqrt_groups = len(re.findall(r"sqrt\{", raw))
     p(f"sqrt groups      {sqrt_groups:,}")

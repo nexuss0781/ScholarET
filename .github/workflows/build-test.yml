@@ -112,6 +112,9 @@ jobs:
           grep -oE '.{0,18}\$[^$]{1,40}\$' out_test/book.md | sed -n '1,5p' || true
           echo "[unmapped glyph context]"
           grep -E '^\s+code=' extract.log | sort | uniq -c | sort -rn | sed -n '1,30p' || true
+          # Counts alone proved nothing: the previous gate passed while 81 prose
+          # spans sat inside $...$. The audit workflow now measures quality, so
+          # this gate only guards against losing features entirely.
           test "$math_spans" -gt 100
           test "$sup_spans" -gt 100
           test "$sub_spans" -gt 100

@@ -659,6 +659,7 @@ DocResult Extractor::process_document(const std::filesystem::path& input_path) {
     fz_drop_document(c, doc);
     dr.pages = std::move(page_results);
     dr.merged_blocks = merge_document_blocks(dr.pages);
+    drop_repeated_page_text(dr.merged_blocks, dr.pages.size());
     normalize_blocks(dr.merged_blocks);
     build_outline(dr.merged_blocks, dr);
     for (const auto& pr : dr.pages) {
@@ -913,6 +914,16 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
                         else if (s.text.find('=') != std::string::npos) rule = "equals";
                         else if (math_symbol_ratio(s.text) >= 0.6f) rule = "ratio";
                         else if (looks_like_quantity(s.text)) rule = "quantity";
+                        if (rule[0] != 'n' && span_looks_like_prose(s.text)) {
+                            // Keep the rule for diagnostics, but do not emit the
+                            // prose as math.
+                            ++prose_rejected_;
+                            if (math_rule_samples_.size() < 24) {
+                                math_rule_samples_.push_back(std::string("rejected-prose | ") +
+                                                             fnl + " | " + s.text.substr(0, 40));
+                            }
+                            rule = "none";
+                        }
                         s.is_math = (rule[0] != 'n');
                         if (s.is_math) {
                             std::lock_guard<std::mutex> lk(diag_mutex_);
@@ -1192,6 +1203,55 @@ void Extractor::detect_headers_footers(PageResult& pr, std::vector<Block>& block
     blocks.swap(kept);
 }
 
+// Drop text that repeats on many pages. Page furniture such as
+// "Ethiofetena.com Ethiopian No 1 Educational Website" sits inside the text
+// area rather than in the header/footer band, so the geometric filter cannot see
+// it; repetition across pages is the reliable signal. Body text that legitimately
+// recurs (a chapter title, a figure number) is spared by requiring a short,
+// punctuation-light string that appears on a large share of pages.
+void Extractor::drop_repeated_page_text(std::vector<Block>& blocks, size_t page_count) {
+    if (blocks.empty() || page_count < 4) return;
+    std::map<std::string, std::set<int>> seen;
+    for (const auto& b : blocks) {
+        for (const auto& l : b.lines) {
+            std::string key = to_lower_copy(trim_copy(join_spans_text(l.spans)));
+            if (key.size() < 8 || key.size() > 90) continue;
+            // Require it to look like furniture, not a sentence.
+            int letters = 0, punct = 0;
+            for (char c : key) {
+                if (std::isalpha(static_cast<unsigned char>(c))) ++letters;
+                else if (std::isspace(static_cast<unsigned char>(c))) continue;
+                else if (c == '.' || c == ',') continue;
+                else ++punct;
+            }
+            if (letters < 6) continue;
+            if (punct > 1) continue;
+            seen[key].insert(b.page_num);
+        }
+    }
+    size_t need = std::max<size_t>(4, page_count / 4);
+    std::set<std::string> furniture;
+    for (const auto& kv : seen) {
+        if (kv.second.size() >= need) furniture.insert(kv.first);
+    }
+    if (furniture.empty()) return;
+    size_t removed = 0;
+    for (auto& b : blocks) {
+        std::vector<Line> kept;
+        kept.reserve(b.lines.size());
+        for (auto& l : b.lines) {
+            std::string key = to_lower_copy(trim_copy(join_spans_text(l.spans)));
+            if (furniture.count(key)) { ++removed; continue; }
+            kept.push_back(std::move(l));
+        }
+        b.lines = std::move(kept);
+    }
+    {
+        std::lock_guard<std::mutex> lk(diag_mutex_);
+        dropped_repeated_ += removed;
+    }
+}
+
 void Extractor::classify_blocks(std::vector<Block>& blocks, const PageTextStats& stats, int page_num) {
     float base = stats.font_size_median;
     if (base < 1.0f) base = stats.font_size_mean;
@@ -1300,8 +1360,18 @@ void Extractor::build_outline(std::vector<Block>& blocks, DocResult& dr) {
     dr.outline.clear();
     for (const auto& b : blocks) {
         if (b.type == BlockType::Chapter || b.type == BlockType::Section || b.type == BlockType::Subsection || b.type == BlockType::Subsubsection || b.type == BlockType::Title) {
+            // A real heading is short. Long blocks that merely had a large font
+            // were producing 1900-character table-of-contents entries, one per
+            // page, which is what the audit flagged as oversized anchors.
+            std::string title = trim_copy(block_text(b));
+            if (title.empty()) continue;
+            if (title.size() > 120) {
+                size_t cut = title.find(". ");
+                if (cut != std::string::npos && cut + 2 <= 120) title = title.substr(0, cut + 1);
+                else continue;
+            }
             DocOutlineItem oi;
-            oi.title = block_text(b);
+            oi.title = title;
             oi.level = b.level;
             if (oi.level == 0 && b.type == BlockType::Title) oi.level = 0;
             oi.page_num = b.page_num;
@@ -1407,7 +1477,10 @@ std::string Extractor::escape_md_plain(const std::string& s) {
         // only structural at the very start of a line, which is handled by the
         // block emitters, and escaping them destroyed the readability of the
         // output (and collided with LaTeX).
-        bool esc = (c == '\\' || c == '`' || c == '*' || c == '_' ||
+        // Backslash is deliberately NOT escaped: every backslash in the output is
+        // one of our own LaTeX commands, and escaping it turned \times into
+        // \\times. Markdown gives a backslash no special meaning on its own.
+        bool esc = (c == '`' || c == '*' || c == '_' ||
                     c == '[' || c == ']' || c == '<' || c == '>' || c == '|');
         if (!esc && i == 0) {
             esc = (c == '#' || c == '>' );
@@ -1437,6 +1510,8 @@ void Extractor::dump_diagnostics() const {
     std::cerr << "[SCHOLARET-DIAG] subscript spans: " << stat_sub_spans_ << "\n";
     std::cerr << "[SCHOLARET-DIAG] glyphs recovered: " << stat_glyph_fixed_ << "\n";
     std::cerr << "[SCHOLARET-DIAG] distinct unmapped glyph names: " << v.size() << "\n";
+    std::cerr << "[SCHOLARET-DIAG] prose spans rejected as math: " << prose_rejected_ << "\n";
+    std::cerr << "[SCHOLARET-DIAG] repeated footer lines dropped: " << dropped_repeated_ << "\n";
     std::cerr << "[SCHOLARET-DIAG] math rules:";
     for (const auto& kv : math_rules_) {
         std::cerr << " [" << kv.first << "=" << kv.second << "]";
@@ -1461,6 +1536,8 @@ std::string Extractor::render_line_text(const Line& l) {
         if (sp.text.empty()) continue;
         const bool m = sp.is_math;
         if (m != prev_math) {
+            // A boundary before a math span needs a separator. Without it
+            // "P" + "\u00d7" + "pascal" rendered as one token.
             if (!out.empty() && out.back() != ' ') out.push_back(' ');
             out.push_back('$');
             prev_math = m;

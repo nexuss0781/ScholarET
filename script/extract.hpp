@@ -321,6 +321,7 @@ private:
     std::vector<Block> analyze_layout(const std::vector<Line>& lines, PageResult& pr);
     void detect_columns(PageResult& pr);
     void detect_headers_footers(PageResult& pr, std::vector<Block>& blocks);
+    void drop_repeated_page_text(std::vector<Block>& blocks, size_t page_count);
     void classify_blocks(std::vector<Block>& blocks, const PageTextStats& stats, int page_num);
     void refine_headings(std::vector<Block>& blocks, const PageTextStats& stats);
     void detect_lists(std::vector<Block>& blocks);
@@ -369,6 +370,8 @@ private:
     size_t stat_math_spans_ = 0;
     size_t stat_display_lines_ = 0;
     size_t stat_glyph_fixed_ = 0;
+    size_t prose_rejected_ = 0;
+    size_t dropped_repeated_ = 0;
 };
 
 } // namespace scholaret
