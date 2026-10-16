@@ -1,0 +1,194 @@
+name: Extract Grade 1-12 Books (19 Workers)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test inventory and packaging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout ScholarET
+        uses: actions/checkout@v4
+
+      - name: Run extraction pipeline tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Publish source inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: scholaret-grade-book-inventory
+          path: |
+            data/source_book_inventory.csv
+            data/source_book_inventory.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+  build-extractor:
+    name: Build ScholarET PDF extractor once
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout ScholarET
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config python3 zip file
+
+      - name: Build MuPDF 1.23.11
+        run: |
+          git clone --depth 1 --branch 1.23.11 --shallow-submodules --recurse-submodules \
+            https://github.com/ArtifexSoftware/mupdf.git /tmp/mupdf-1.23.11
+          cd /tmp/mupdf-1.23.11
+          test -f thirdparty/lcms2/include/lcms2mt.h
+          make -j"$(nproc)" shared=yes HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
+          sudo make install shared=yes HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no
+
+      - name: Build ScholarET extractor
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}
+          export LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH:-}
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+          ./build/extract --help
+
+      - name: Stage a transferable extractor runtime
+        run: |
+          set -euo pipefail
+          mkdir -p runtime/bin runtime/lib
+          install -m 0755 build/extract runtime/bin/extract
+          copied=0
+          for library in /usr/local/lib/libmupdf*.so*; do
+            [ -e "$library" ] || continue
+            cp -L "$library" "runtime/lib/$(basename "$library")"
+            copied=1
+          done
+          test "$copied" -eq 1
+          LD_LIBRARY_PATH="$PWD/runtime/lib" ldd runtime/bin/extract | tee runtime/ldd.txt
+          if grep -q 'not found' runtime/ldd.txt; then
+            echo 'A shared library required by ScholarET is missing from the runtime artifact.' >&2
+            exit 1
+          fi
+
+      - name: Upload ScholarET runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: scholaret-extractor-runtime
+          path: runtime/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 6
+
+  extract:
+    name: Worker ${{ matrix.worker_id }}
+    needs: build-extractor
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 19
+      matrix:
+        worker_id:
+          - "00"
+          - "01"
+          - "02"
+          - "03"
+          - "04"
+          - "05"
+          - "06"
+          - "07"
+          - "08"
+          - "09"
+          - "10"
+          - "11"
+          - "12"
+          - "13"
+          - "14"
+          - "15"
+          - "16"
+          - "17"
+          - "18"
+    steps:
+      - name: Checkout ScholarET
+        uses: actions/checkout@v4
+
+      - name: Download shared ScholarET runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: scholaret-extractor-runtime
+          path: runtime
+
+      - name: Check runtime on worker
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/runtime/lib
+        run: |
+          set -euo pipefail
+          chmod +x runtime/bin/extract
+          ldd runtime/bin/extract | tee runtime/worker-ldd.txt
+          if grep -q 'not found' runtime/worker-ldd.txt; then
+            echo 'ScholarET runtime is missing a shared library on this worker.' >&2
+            exit 1
+          fi
+
+      - name: Extract this worker's grade-book shard
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/runtime/lib
+          PYTHONUTF8: "1"
+        run: |
+          set -euo pipefail
+          python3 scripts/extract_source_books.py worker \
+            --inventory data/source_book_inventory.json \
+            --worker-id "${{ matrix.worker_id }}" \
+            --extractor runtime/bin/extract \
+            --output-dir worker-output
+
+      - name: Upload this worker's ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: scholaret-grade-worker-${{ matrix.worker_id }}
+          path: worker-output/scholaret-worker-${{ matrix.worker_id }}.zip
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  verify:
+    name: Verify all 19 worker archives
+    needs: [test, build-extractor, extract]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Stop if a prerequisite job failed
+        if: ${{ always() && (needs.test.result != 'success' || needs.build-extractor.result != 'success' || needs.extract.result != 'success') }}
+        run: |
+          echo 'The inventory test, extractor build, or at least one worker did not succeed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Review the failed prerequisite jobs; no complete 19-archive set is available.' >&2
+          exit 1
+
+      - name: Checkout ScholarET
+        uses: actions/checkout@v4
+
+      - name: Download worker ZIP artifacts for verification
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scholaret-grade-worker-*
+          path: worker-zips
+          merge-multiple: true
+
+      - name: Verify all 19 ZIPs and publish run summary
+        run: |
+          set -euo pipefail
+          python3 scripts/extract_source_books.py validate \
+            --inventory data/source_book_inventory.json \
+            --archive-dir worker-zips \
+            --summary-file worker-summary.md
+          cat worker-summary.md >> "$GITHUB_STEP_SUMMARY"
