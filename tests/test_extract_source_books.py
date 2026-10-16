@@ -54,6 +54,43 @@ class ExtractSourceBooksTests(unittest.TestCase):
         extractor.chmod(0o755)
         return extractor
 
+    def _write_assignment_map(
+        self,
+        path: Path,
+        source_books: list[dict],
+        reverse: bool = True,
+    ) -> None:
+        workers = []
+        total_bytes = 0
+        for worker_id in range(1, books.WORKER_COUNT + 1):
+            index = books.WORKER_COUNT - worker_id if reverse else worker_id - 1
+            book = source_books[index]
+            size = book["source_bytes"]
+            workers.append(
+                {
+                    "worker_id": f"worker_{worker_id:02d}",
+                    "file_count": 1,
+                    "total_size_bytes": size,
+                    "files": [
+                        {"path": book["source_path"], "size_bytes": size}
+                    ],
+                }
+            )
+            total_bytes += size
+        document = {
+            "repository": f"https://github.com/{books.SOURCE_REPOSITORY}",
+            "source_directory": "Source/",
+            "size_basis": "Git LFS pointer object size (bytes)",
+            "balancing_method": "test-only reversed assignment",
+            "worker_count": books.WORKER_COUNT,
+            "pdf_count": len(source_books),
+            "total_size_bytes": total_bytes,
+            "average_size_bytes_per_worker": total_bytes / books.WORKER_COUNT,
+            "workers": workers,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
     def test_inventory_and_lpt_assignments_are_complete_and_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -64,7 +101,7 @@ class ExtractSourceBooksTests(unittest.TestCase):
             self.assertEqual(document["worker_count"], books.WORKER_COUNT)
             self.assertEqual(
                 {entry["worker_id"] for entry in document["books"]},
-                set(range(books.WORKER_COUNT)),
+                set(range(1, books.WORKER_COUNT + 1)),
             )
             again = books.build_inventory(source_root, revision)
             self.assertEqual(document, again)
@@ -78,6 +115,54 @@ class ExtractSourceBooksTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             self.assertEqual(len(rows), books.WORKER_COUNT)
             self.assertEqual(rows[0]["source_path"].split("/")[-1], "Book-00.pdf")
+            self.assertEqual(rows[0]["worker_id"], "1")
+
+    def test_assignment_map_is_authoritative_and_hash_pinned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_root, _ = self._make_source_tree(root)
+            revision = "e" * 40
+            base = books.build_inventory(source_root, revision)
+            map_path = root / "data" / "pdf_worker_assignments.json"
+            self._write_assignment_map(map_path, base["books"], reverse=True)
+
+            document = books.build_inventory(source_root, revision, map_path)
+            assignments, sizes, _, _ = books._load_worker_assignment_map(map_path)
+            self.assertEqual(document["assignment_map_file"], map_path.name)
+            self.assertEqual(
+                document["assignment_map_sha256"],
+                hashlib.sha256(map_path.read_bytes()).hexdigest(),
+            )
+            for book in document["books"]:
+                self.assertEqual(book["worker_id"], assignments[book["source_path"]])
+                self.assertEqual(book["source_bytes"], sizes[book["source_path"]])
+
+            inventory_path = map_path.parent / "source_book_inventory.json"
+            books.write_inventory(
+                document,
+                inventory_path,
+                map_path.parent / "source_book_inventory.csv",
+                map_path,
+            )
+            self.assertEqual(books.load_inventory(inventory_path), document)
+
+            modified = json.loads(map_path.read_text(encoding="utf-8"))
+            modified["balancing_method"] += " changed"
+            map_path.write_text(json.dumps(modified), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                books.load_inventory(inventory_path)
+
+    def test_checked_in_inventory_matches_the_supplied_94_pdf_map(self) -> None:
+        inventory_path = ROOT / "data" / "source_book_inventory.json"
+        map_path = ROOT / "data" / "pdf_worker_assignments.json"
+        document = books.load_inventory(inventory_path)
+        assignments, sizes, loads, _ = books._load_worker_assignment_map(map_path)
+        self.assertEqual(document["book_count"], 94)
+        self.assertEqual(len(assignments), 94)
+        self.assertEqual(document["worker_source_bytes"], loads)
+        for book in document["books"]:
+            self.assertEqual(book["worker_id"], assignments[book["source_path"]])
+            self.assertEqual(book["source_bytes"], sizes[book["source_path"]])
 
     def test_workers_write_one_grade_structured_zip_each_and_validator_accepts_all(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -98,7 +183,7 @@ class ExtractSourceBooksTests(unittest.TestCase):
             with mock.patch.object(books, "download_source_pdf", side_effect=fake_download):
                 archives = [
                     books.run_worker(inventory_path, worker_id, extractor, output_dir)
-                    for worker_id in range(books.WORKER_COUNT)
+                    for worker_id in range(1, books.WORKER_COUNT + 1)
                 ]
 
             self.assertEqual(len(archives), books.WORKER_COUNT)
@@ -109,7 +194,9 @@ class ExtractSourceBooksTests(unittest.TestCase):
 
             import zipfile
 
-            for worker_id, archive_path in enumerate(archives):
+            for worker_id, archive_path in zip(
+                range(1, books.WORKER_COUNT + 1), archives
+            ):
                 with zipfile.ZipFile(archive_path) as archive:
                     manifest = json.loads(archive.read("manifest.json"))
                     self.assertEqual(manifest["worker_id"], worker_id)

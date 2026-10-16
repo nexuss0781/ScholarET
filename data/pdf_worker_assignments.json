@@ -1,0 +1,521 @@
+{
+  "repository": "https://github.com/ethcocoders/Digital-Library",
+  "source_directory": "Source/",
+  "size_basis": "Git LFS pointer object size (bytes)",
+  "balancing_method": "Longest-processing-time greedy assignment with local moves/swaps minimizing total squared deviation from the mean",
+  "worker_count": 19,
+  "pdf_count": 94,
+  "total_size_bytes": 2541123303,
+  "average_size_bytes_per_worker": 133743331.74,
+  "workers": [
+    {
+      "worker_id": "worker_01",
+      "file_count": 1,
+      "total_size_bytes": 181383938,
+      "files": [
+        {
+          "path": "Source/System/Grade 12/Biology.pdf",
+          "size_bytes": 181383938
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_02",
+      "file_count": 1,
+      "total_size_bytes": 146307124,
+      "files": [
+        {
+          "path": "Source/System/Grade 11/English.pdf",
+          "size_bytes": 146307124
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_03",
+      "file_count": 1,
+      "total_size_bytes": 143356809,
+      "files": [
+        {
+          "path": "Source/System/Grade 11/Mathematics.pdf",
+          "size_bytes": 143356809
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_04",
+      "file_count": 1,
+      "total_size_bytes": 132597489,
+      "files": [
+        {
+          "path": "Source/System/Grade 3/Mathematics.pdf",
+          "size_bytes": 132597489
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_05",
+      "file_count": 2,
+      "total_size_bytes": 129202472,
+      "files": [
+        {
+          "path": "Source/System/Grade 11/Economics.pdf",
+          "size_bytes": 5758384
+        },
+        {
+          "path": "Source/System/Grade 12/Mathematics.pdf",
+          "size_bytes": 123444088
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_06",
+      "file_count": 2,
+      "total_size_bytes": 129169137,
+      "files": [
+        {
+          "path": "Source/System/Grade 7/Mathematics.pdf",
+          "size_bytes": 121498286
+        },
+        {
+          "path": "Source/System/Grade 9/Chemistry.pdf",
+          "size_bytes": 7670851
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_07",
+      "file_count": 4,
+      "total_size_bytes": 129218681,
+      "files": [
+        {
+          "path": "Source/System/Grade 1/Mathematics.pdf",
+          "size_bytes": 106304593
+        },
+        {
+          "path": "Source/System/Grade 11/Chemistry.pdf",
+          "size_bytes": 7853341
+        },
+        {
+          "path": "Source/System/Grade 12/Economics.pdf",
+          "size_bytes": 5577753
+        },
+        {
+          "path": "Source/System/Grade 9/History.pdf",
+          "size_bytes": 9482994
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_08",
+      "file_count": 4,
+      "total_size_bytes": 129142090,
+      "files": [
+        {
+          "path": "Source/System/Grade 2/Mathematics.pdf",
+          "size_bytes": 106027360
+        },
+        {
+          "path": "Source/System/Grade 7/Career and Technical Education.pdf",
+          "size_bytes": 9821418
+        },
+        {
+          "path": "Source/System/Grade 7/English.pdf",
+          "size_bytes": 5070700
+        },
+        {
+          "path": "Source/System/Grade 9/Physics.pdf",
+          "size_bytes": 8222612
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_09",
+      "file_count": 4,
+      "total_size_bytes": 129170666,
+      "files": [
+        {
+          "path": "Source/System/Grade 1/Performing and Visual Arts.pdf",
+          "size_bytes": 6756994
+        },
+        {
+          "path": "Source/System/Grade 12/Chemistry.pdf",
+          "size_bytes": 9031027
+        },
+        {
+          "path": "Source/System/Grade 12/Physics.pdf",
+          "size_bytes": 11172058
+        },
+        {
+          "path": "Source/System/Grade 5/Mathematics.pdf",
+          "size_bytes": 102210587
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_10",
+      "file_count": 6,
+      "total_size_bytes": 129164200,
+      "files": [
+        {
+          "path": "Source/System/Grade 11/Geography.pdf",
+          "size_bytes": 11106398
+        },
+        {
+          "path": "Source/System/Grade 6/Mathematics.pdf",
+          "size_bytes": 89584146
+        },
+        {
+          "path": "Source/System/Grade 7/Performing and Visual Arts.pdf",
+          "size_bytes": 8410223
+        },
+        {
+          "path": "Source/System/Grade 8/Citizenship Education.pdf",
+          "size_bytes": 12037135
+        },
+        {
+          "path": "Source/System/Grade 9/Amharic.pdf",
+          "size_bytes": 1412578
+        },
+        {
+          "path": "Source/System/Grade 9/Health and Physical Education.pdf",
+          "size_bytes": 6613720
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_11",
+      "file_count": 6,
+      "total_size_bytes": 129143690,
+      "files": [
+        {
+          "path": "Source/System/Grade 11/Physics.pdf",
+          "size_bytes": 9776585
+        },
+        {
+          "path": "Source/System/Grade 12/Geography.pdf",
+          "size_bytes": 11359232
+        },
+        {
+          "path": "Source/System/Grade 4/Amharic.pdf",
+          "size_bytes": 6155509
+        },
+        {
+          "path": "Source/System/Grade 9/Economics.pdf",
+          "size_bytes": 4641627
+        },
+        {
+          "path": "Source/System/Grade 9/English.pdf",
+          "size_bytes": 82622715
+        },
+        {
+          "path": "Source/System/Grade 9/Information Technology.pdf",
+          "size_bytes": 14588022
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_12",
+      "file_count": 6,
+      "total_size_bytes": 129219972,
+      "files": [
+        {
+          "path": "Source/System/Grade 10/Amharic.pdf",
+          "size_bytes": 17442541
+        },
+        {
+          "path": "Source/System/Grade 10/Citizenship Education.pdf",
+          "size_bytes": 12033189
+        },
+        {
+          "path": "Source/System/Grade 11/Information Technology.pdf",
+          "size_bytes": 4433844
+        },
+        {
+          "path": "Source/System/Grade 5/Performing and Visual Arts.pdf",
+          "size_bytes": 78459848
+        },
+        {
+          "path": "Source/System/Grade 8/Career and Technical Education.pdf",
+          "size_bytes": 9763563
+        },
+        {
+          "path": "Source/System/Grade 9/Citizenship Education.pdf",
+          "size_bytes": 7086987
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_13",
+      "file_count": 8,
+      "total_size_bytes": 129154625,
+      "files": [
+        {
+          "path": "Source/System/Grade 10/Chemistry.pdf",
+          "size_bytes": 6700581
+        },
+        {
+          "path": "Source/System/Grade 10/Information Technology.pdf",
+          "size_bytes": 12298443
+        },
+        {
+          "path": "Source/System/Grade 10/Mathematics.pdf",
+          "size_bytes": 23268890
+        },
+        {
+          "path": "Source/System/Grade 3/Performing and Visual Arts.pdf",
+          "size_bytes": 44444347
+        },
+        {
+          "path": "Source/System/Grade 4/Performing and Visual Arts.pdf",
+          "size_bytes": 8480458
+        },
+        {
+          "path": "Source/System/Grade 6/Performing and Visual Arts.pdf",
+          "size_bytes": 4357691
+        },
+        {
+          "path": "Source/System/Grade 7/General Science.pdf",
+          "size_bytes": 10964843
+        },
+        {
+          "path": "Source/System/Grade 9/Mathematics.pdf",
+          "size_bytes": 18639372
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_14",
+      "file_count": 8,
+      "total_size_bytes": 129139568,
+      "files": [
+        {
+          "path": "Source/System/Grade 1/Amharic.pdf",
+          "size_bytes": 21010384
+        },
+        {
+          "path": "Source/System/Grade 11/Amharic.pdf",
+          "size_bytes": 4307348
+        },
+        {
+          "path": "Source/System/Grade 11/Biology.pdf",
+          "size_bytes": 40137859
+        },
+        {
+          "path": "Source/System/Grade 2/Performing and Visual Arts.pdf",
+          "size_bytes": 8848021
+        },
+        {
+          "path": "Source/System/Grade 7/Amharic.pdf",
+          "size_bytes": 7280673
+        },
+        {
+          "path": "Source/System/Grade 8/Information Technology.pdf",
+          "size_bytes": 12659135
+        },
+        {
+          "path": "Source/System/Grade 9/Biology.pdf",
+          "size_bytes": 11590709
+        },
+        {
+          "path": "Source/System/Grade 9/Geography.pdf",
+          "size_bytes": 23305439
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_15",
+      "file_count": 8,
+      "total_size_bytes": 129170487,
+      "files": [
+        {
+          "path": "Source/System/Grade 12/Agriculture.pdf",
+          "size_bytes": 39807204
+        },
+        {
+          "path": "Source/System/Grade 12/History.pdf",
+          "size_bytes": 7633827
+        },
+        {
+          "path": "Source/System/Grade 2/Amharic.pdf",
+          "size_bytes": 9692344
+        },
+        {
+          "path": "Source/System/Grade 2/Environmental Science.pdf",
+          "size_bytes": 24485183
+        },
+        {
+          "path": "Source/System/Grade 7/Information Technology.pdf",
+          "size_bytes": 11343982
+        },
+        {
+          "path": "Source/System/Grade 7/Social Studies.pdf",
+          "size_bytes": 13154314
+        },
+        {
+          "path": "Source/System/Grade 8/English.pdf",
+          "size_bytes": 4106226
+        },
+        {
+          "path": "Source/System/Grade 8/General Science.pdf",
+          "size_bytes": 18947407
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_16",
+      "file_count": 8,
+      "total_size_bytes": 129133029,
+      "files": [
+        {
+          "path": "Source/System/Grade 1/English.pdf",
+          "size_bytes": 21198972
+        },
+        {
+          "path": "Source/System/Grade 10/Biology.pdf",
+          "size_bytes": 12884193
+        },
+        {
+          "path": "Source/System/Grade 10/Health and Physical Education.pdf",
+          "size_bytes": 9637856
+        },
+        {
+          "path": "Source/System/Grade 11/History.pdf",
+          "size_bytes": 11489286
+        },
+        {
+          "path": "Source/System/Grade 5/English.pdf",
+          "size_bytes": 37361972
+        },
+        {
+          "path": "Source/System/Grade 6/Environmental Science.pdf",
+          "size_bytes": 24748045
+        },
+        {
+          "path": "Source/System/Grade 7/Citizenship Education.pdf",
+          "size_bytes": 8879152
+        },
+        {
+          "path": "Source/System/Grade 8/Social Studies.pdf",
+          "size_bytes": 2933553
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_17",
+      "file_count": 8,
+      "total_size_bytes": 129145634,
+      "files": [
+        {
+          "path": "Source/System/Grade 10/History.pdf",
+          "size_bytes": 10453881
+        },
+        {
+          "path": "Source/System/Grade 10/Physics.pdf",
+          "size_bytes": 9912153
+        },
+        {
+          "path": "Source/System/Grade 11/Agriculture.pdf",
+          "size_bytes": 21477262
+        },
+        {
+          "path": "Source/System/Grade 12/Amharic.pdf",
+          "size_bytes": 4679477
+        },
+        {
+          "path": "Source/System/Grade 3/Environmental Science.pdf",
+          "size_bytes": 14103048
+        },
+        {
+          "path": "Source/System/Grade 5/Amharic.pdf",
+          "size_bytes": 6883114
+        },
+        {
+          "path": "Source/System/Grade 6/English.pdf",
+          "size_bytes": 26789049
+        },
+        {
+          "path": "Source/System/Grade 8/Performing and Visual Arts.pdf",
+          "size_bytes": 34847650
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_18",
+      "file_count": 8,
+      "total_size_bytes": 129143941,
+      "files": [
+        {
+          "path": "Source/System/Grade 10/Economics.pdf",
+          "size_bytes": 4732063
+        },
+        {
+          "path": "Source/System/Grade 10/English.pdf",
+          "size_bytes": 7764436
+        },
+        {
+          "path": "Source/System/Grade 10/Geography.pdf",
+          "size_bytes": 11554143
+        },
+        {
+          "path": "Source/System/Grade 12/English.pdf",
+          "size_bytes": 16667381
+        },
+        {
+          "path": "Source/System/Grade 3/English.pdf",
+          "size_bytes": 31553110
+        },
+        {
+          "path": "Source/System/Grade 4/English.pdf",
+          "size_bytes": 26981112
+        },
+        {
+          "path": "Source/System/Grade 4/Mathematics.pdf",
+          "size_bytes": 23165369
+        },
+        {
+          "path": "Source/System/Grade 6/Amharic.pdf",
+          "size_bytes": 6726327
+        }
+      ]
+    },
+    {
+      "worker_id": "worker_19",
+      "file_count": 8,
+      "total_size_bytes": 129159751,
+      "files": [
+        {
+          "path": "Source/System/Grade 1/Environmental Science.pdf",
+          "size_bytes": 22535053
+        },
+        {
+          "path": "Source/System/Grade 12/Information Technology.pdf",
+          "size_bytes": 9056305
+        },
+        {
+          "path": "Source/System/Grade 2/English.pdf",
+          "size_bytes": 15523900
+        },
+        {
+          "path": "Source/System/Grade 2/Health and Physical Education.pdf",
+          "size_bytes": 10051921
+        },
+        {
+          "path": "Source/System/Grade 3/Amharic.pdf",
+          "size_bytes": 5043582
+        },
+        {
+          "path": "Source/System/Grade 4/Environmental Science.pdf",
+          "size_bytes": 30416010
+        },
+        {
+          "path": "Source/System/Grade 5/Environmental Science.pdf",
+          "size_bytes": 29057278
+        },
+        {
+          "path": "Source/System/Grade 8/Amharic.pdf",
+          "size_bytes": 7475702
+        }
+      ]
+    }
+  ]
+}

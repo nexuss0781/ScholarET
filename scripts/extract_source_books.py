@@ -92,16 +92,105 @@ def _lpt_assignments(books: Iterable[dict[str, Any]]) -> tuple[dict[str, int], l
         key=lambda book: (-int(book["source_bytes"]), str(book["source_path"])),
     )
     for book in ordered:
-        worker_id = min(range(WORKER_COUNT), key=lambda idx: (loads[idx], idx))
+        worker_slot = min(range(WORKER_COUNT), key=lambda idx: (loads[idx], idx))
+        worker_id = worker_slot + 1
         source_path = str(book["source_path"])
         if source_path in assignments:
             raise ValueError(f"duplicate source path: {source_path}")
         assignments[source_path] = worker_id
-        loads[worker_id] += int(book["source_bytes"])
+        loads[worker_slot] += int(book["source_bytes"])
     return assignments, loads
 
 
-def build_inventory(source_root: Path | str, source_revision: str) -> dict[str, Any]:
+def _load_worker_assignment_map(
+    path: Path | str,
+) -> tuple[dict[str, int], dict[str, int], list[int], str]:
+    """Load and validate a one-based worker_01..worker_19 PDF assignment map."""
+    map_path = Path(path)
+    try:
+        document = json.loads(map_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read worker assignment map {map_path}: {exc}") from exc
+    if not isinstance(document, dict):
+        raise ValueError("worker assignment map root must be a JSON object")
+    if document.get("repository") != f"https://github.com/{SOURCE_REPOSITORY}":
+        raise ValueError("worker assignment map points to the wrong repository")
+    if document.get("source_directory") != "Source/":
+        raise ValueError("worker assignment map source_directory must be Source/")
+    if document.get("worker_count") != WORKER_COUNT:
+        raise ValueError(f"worker assignment map must contain exactly {WORKER_COUNT} workers")
+
+    workers = document.get("workers")
+    if not isinstance(workers, list) or len(workers) != WORKER_COUNT:
+        raise ValueError(f"worker assignment map must list exactly {WORKER_COUNT} workers")
+    assignments: dict[str, int] = {}
+    sizes: dict[str, int] = {}
+    loads = [0] * WORKER_COUNT
+    seen_workers: set[int] = set()
+
+    for worker in workers:
+        if not isinstance(worker, dict):
+            raise ValueError("each worker assignment must be an object")
+        worker_label = worker.get("worker_id")
+        match = re.fullmatch(r"worker_(\d{2})", worker_label) if isinstance(worker_label, str) else None
+        if not match:
+            raise ValueError(f"invalid worker label in assignment map: {worker_label!r}")
+        worker_id = int(match.group(1))
+        if not (1 <= worker_id <= WORKER_COUNT) or worker_id in seen_workers:
+            raise ValueError(f"duplicate or invalid worker label: {worker_label!r}")
+        seen_workers.add(worker_id)
+
+        files = worker.get("files")
+        if not isinstance(files, list) or not files:
+            raise ValueError(f"{worker_label} must have at least one assigned PDF")
+        worker_total = 0
+        for item in files:
+            if not isinstance(item, dict):
+                raise ValueError(f"invalid file entry in {worker_label}")
+            source_path = item.get("path")
+            if not isinstance(source_path, str):
+                raise ValueError(f"missing source path in {worker_label}")
+            pure_path = PurePosixPath(source_path)
+            if (
+                pure_path.is_absolute()
+                or ".." in pure_path.parts
+                or "\\" in source_path
+                or not source_path.startswith("Source/")
+            ):
+                raise ValueError(f"unsafe source path in assignment map: {source_path!r}")
+            _parse_grade_and_name(source_path)
+            size_bytes = item.get("size_bytes")
+            if type(size_bytes) is not int or size_bytes <= 0:
+                raise ValueError(f"invalid size for assignment-map path {source_path!r}")
+            if source_path in assignments:
+                raise ValueError(f"duplicate source path in assignment map: {source_path}")
+            assignments[source_path] = worker_id
+            sizes[source_path] = size_bytes
+            worker_total += size_bytes
+
+        if worker.get("file_count") != len(files):
+            raise ValueError(f"file_count mismatch for {worker_label}")
+        if worker.get("total_size_bytes") != worker_total:
+            raise ValueError(f"total_size_bytes mismatch for {worker_label}")
+        loads[worker_id - 1] = worker_total
+
+    if seen_workers != set(range(1, WORKER_COUNT + 1)):
+        raise ValueError("worker assignment map must contain worker_01 through worker_19")
+    if document.get("pdf_count") != len(assignments):
+        raise ValueError("worker assignment map pdf_count does not match its file entries")
+    if document.get("total_size_bytes") != sum(loads):
+        raise ValueError("worker assignment map total_size_bytes does not match its file entries")
+    method = document.get("balancing_method")
+    if not isinstance(method, str) or not method.strip():
+        raise ValueError("worker assignment map must identify its balancing_method")
+    return assignments, sizes, loads, method
+
+
+def build_inventory(
+    source_root: Path | str,
+    source_revision: str,
+    assignment_map_path: Path | str | None = None,
+) -> dict[str, Any]:
     """Build an inventory from Digital-Library's checked-out Source/ directory."""
     if not COMMIT_SHA_RE.fullmatch(source_revision):
         raise ValueError("source revision must be a full 40-character Git commit SHA")
@@ -130,7 +219,21 @@ def build_inventory(source_root: Path | str, source_revision: str) -> dict[str, 
 
     if not books:
         raise ValueError(f"no Grade 1–12 PDFs found under {source_dir}")
-    assignments, loads = _lpt_assignments(books)
+    if assignment_map_path is None:
+        assignments, loads = _lpt_assignments(books)
+        partition_algorithm = (
+            "largest-processing-time-first by Git LFS object bytes; "
+            "ties by source path then worker id"
+        )
+    else:
+        assignments, map_sizes, loads, partition_algorithm = _load_worker_assignment_map(
+            assignment_map_path
+        )
+        source_sizes = {str(book["source_path"]): int(book["source_bytes"]) for book in books}
+        if map_sizes != source_sizes:
+            raise ValueError(
+                "worker assignment map paths or sizes do not exactly match the source PDFs"
+            )
     for book in books:
         book["worker_id"] = assignments[book["source_path"]]
     books.sort(key=lambda book: (int(book["grade"]), str(book["source_path"])))
@@ -141,19 +244,25 @@ def build_inventory(source_root: Path | str, source_revision: str) -> dict[str, 
         "source_repository": SOURCE_REPOSITORY,
         "source_revision": source_revision,
         "worker_count": WORKER_COUNT,
-        "partition_algorithm": "largest-processing-time-first by Git LFS object bytes; ties by source path then worker id",
+        "partition_algorithm": partition_algorithm,
         "book_count": len(books),
         "total_source_bytes": sum(int(book["source_bytes"]) for book in books),
         "worker_source_bytes": loads,
         "grade_counts": {grade: grade_counts[grade] for grade in sorted(grade_counts, key=int)},
         "books": books,
     }
-    validate_inventory(document)
+    if assignment_map_path is not None:
+        document["assignment_map_file"] = Path(assignment_map_path).name
+        document["assignment_map_sha256"] = _sha256_file(Path(assignment_map_path))
+    validate_inventory(document, assignment_map_path)
     return document
 
 
-def validate_inventory(document: dict[str, Any]) -> None:
-    """Fail closed if the inventory is incomplete, unsafe, or not canonical."""
+def validate_inventory(
+    document: dict[str, Any],
+    assignment_map_path: Path | str | None = None,
+) -> None:
+    """Fail closed if the inventory is incomplete, unsafe, or misassigned."""
     if document.get("schema_version") != INVENTORY_SCHEMA_VERSION:
         raise ValueError("unsupported inventory schema_version")
     if document.get("source_repository") != SOURCE_REPOSITORY:
@@ -188,7 +297,7 @@ def validate_inventory(document: dict[str, Any]) -> None:
         if type(source_bytes) is not int or source_bytes <= 0:
             raise ValueError(f"invalid source_bytes for {source_path!r}")
         worker_id = book.get("worker_id")
-        if type(worker_id) is not int or not (0 <= worker_id < WORKER_COUNT):
+        if type(worker_id) is not int or not (1 <= worker_id <= WORKER_COUNT):
             raise ValueError(f"invalid worker_id for {source_path!r}")
         seen.add(source_path)
         normalized_books.append(book)
@@ -203,22 +312,62 @@ def validate_inventory(document: dict[str, Any]) -> None:
     if document.get("grade_counts") != expected_counts:
         raise ValueError("inventory grade_counts does not match books list")
 
-    assignments, loads = _lpt_assignments(normalized_books)
-    for book in normalized_books:
-        if book["worker_id"] != assignments[book["source_path"]]:
-            raise ValueError(
-                f"non-canonical worker assignment for {book['source_path']!r}"
-            )
+    assignment_map_file = document.get("assignment_map_file")
+    assignment_map_sha = document.get("assignment_map_sha256")
+    if assignment_map_file is not None or assignment_map_sha is not None:
+        if not isinstance(assignment_map_file, str) or not re.fullmatch(
+            r"[^/\\]+", assignment_map_file
+        ):
+            raise ValueError("inventory assignment_map_file must be a safe file name")
+        if not isinstance(assignment_map_sha, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", assignment_map_sha
+        ):
+            raise ValueError("inventory assignment_map_sha256 is invalid")
+        if assignment_map_path is None:
+            raise ValueError("inventory requires its declared worker assignment map")
+        actual_map_sha = _sha256_file(Path(assignment_map_path))
+        if actual_map_sha != assignment_map_sha:
+            raise ValueError("worker assignment map SHA-256 does not match the inventory")
+        assignments, map_sizes, loads, map_method = _load_worker_assignment_map(
+            assignment_map_path
+        )
+        source_sizes = {
+            str(book["source_path"]): int(book["source_bytes"])
+            for book in normalized_books
+        }
+        if map_sizes != source_sizes:
+            raise ValueError("worker assignment map does not match inventory paths or sizes")
+        for book in normalized_books:
+            if book["worker_id"] != assignments[str(book["source_path"])]:
+                raise ValueError(
+                    f"worker assignment mismatch for {book['source_path']!r}"
+                )
+        if document.get("partition_algorithm") != map_method:
+            raise ValueError("inventory partition_algorithm differs from assignment map")
+    else:
+        if assignment_map_path is not None:
+            raise ValueError("assignment map supplied but inventory does not declare it")
+        assignments, loads = _lpt_assignments(normalized_books)
+        for book in normalized_books:
+            if book["worker_id"] != assignments[book["source_path"]]:
+                raise ValueError(
+                    f"non-canonical worker assignment for {book['source_path']!r}"
+                )
     if document.get("worker_source_bytes") != loads:
-        raise ValueError("inventory worker_source_bytes does not match canonical assignments")
+        raise ValueError("inventory worker_source_bytes does not match assignments")
     worker_book_counts = Counter(int(book["worker_id"]) for book in normalized_books)
-    empty = [idx for idx in range(WORKER_COUNT) if worker_book_counts[idx] == 0]
+    empty = [idx for idx in range(1, WORKER_COUNT + 1) if worker_book_counts[idx] == 0]
     if empty:
         raise ValueError(f"inventory leaves worker(s) without books: {empty}")
 
 
-def write_inventory(document: dict[str, Any], json_path: Path | str, csv_path: Path | str) -> None:
-    validate_inventory(document)
+def write_inventory(
+    document: dict[str, Any],
+    json_path: Path | str,
+    csv_path: Path | str,
+    assignment_map_path: Path | str | None = None,
+) -> None:
+    validate_inventory(document, assignment_map_path)
     json_file = Path(json_path)
     csv_file = Path(csv_path)
     json_file.parent.mkdir(parents=True, exist_ok=True)
@@ -252,7 +401,15 @@ def load_inventory(path: Path | str) -> dict[str, Any]:
         raise ValueError(f"cannot read inventory {inventory_path}: {exc}") from exc
     if not isinstance(document, dict):
         raise ValueError("inventory root must be a JSON object")
-    validate_inventory(document)
+    assignment_map_path = None
+    assignment_map_file = document.get("assignment_map_file")
+    if assignment_map_file is not None:
+        if not isinstance(assignment_map_file, str) or not re.fullmatch(
+            r"[^/\\]+", assignment_map_file
+        ):
+            raise ValueError("inventory assignment_map_file must be a safe file name")
+        assignment_map_path = inventory_path.parent / assignment_map_file
+    validate_inventory(document, assignment_map_path)
     return document
 
 
@@ -375,8 +532,8 @@ def run_worker(
 ) -> Path:
     """Process one deterministic shard and write exactly one worker ZIP."""
     inventory = load_inventory(inventory_path)
-    if type(worker_id) is not int or not (0 <= worker_id < WORKER_COUNT):
-        raise ValueError(f"worker_id must be between 0 and {WORKER_COUNT - 1}")
+    if type(worker_id) is not int or not (1 <= worker_id <= WORKER_COUNT):
+        raise ValueError(f"worker_id must be between 1 and {WORKER_COUNT}")
     assigned = [book for book in inventory["books"] if book["worker_id"] == worker_id]
     if not assigned:
         raise ValueError(f"worker {worker_id:02d} has no assigned books")
@@ -511,7 +668,7 @@ def validate_archives(
         worker_id: [
             book for book in inventory["books"] if book["worker_id"] == worker_id
         ]
-        for worker_id in range(WORKER_COUNT)
+        for worker_id in range(1, WORKER_COUNT + 1)
     }
     seen_workers: set[int] = set()
     seen_books: set[str] = set()
@@ -522,7 +679,7 @@ def validate_archives(
         if not match:
             raise ValueError(f"unexpected worker archive name: {archive_path.name}")
         worker_id = int(match.group(1))
-        if worker_id in seen_workers or not (0 <= worker_id < WORKER_COUNT):
+        if worker_id in seen_workers or not (1 <= worker_id <= WORKER_COUNT):
             raise ValueError(f"duplicate or invalid worker archive: {archive_path.name}")
         seen_workers.add(worker_id)
         assigned = expected_by_worker[worker_id]
@@ -614,7 +771,7 @@ def validate_archives(
         except zipfile.BadZipFile as exc:
             raise ValueError(f"invalid ZIP archive {archive_path}") from exc
 
-    expected_workers = set(range(WORKER_COUNT))
+    expected_workers = set(range(1, WORKER_COUNT + 1))
     if seen_workers != expected_workers:
         raise ValueError(f"missing worker ZIPs for IDs: {sorted(expected_workers - seen_workers)}")
     if len(seen_books) != len(inventory["books"]):
@@ -654,6 +811,7 @@ def _create_parser() -> argparse.ArgumentParser:
     inventory_parser = subparsers.add_parser("inventory", help="generate CSV and JSON inventories")
     inventory_parser.add_argument("--source-root", required=True, type=Path)
     inventory_parser.add_argument("--source-revision", required=True)
+    inventory_parser.add_argument("--assignment-map", type=Path)
     inventory_parser.add_argument("--json-out", required=True, type=Path)
     inventory_parser.add_argument("--csv-out", required=True, type=Path)
 
@@ -674,8 +832,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _create_parser().parse_args(argv)
     try:
         if args.command == "inventory":
-            document = build_inventory(args.source_root, args.source_revision)
-            write_inventory(document, args.json_out, args.csv_out)
+            document = build_inventory(
+                args.source_root, args.source_revision, args.assignment_map
+            )
+            write_inventory(
+                document, args.json_out, args.csv_out, args.assignment_map
+            )
             print(
                 f"Wrote {document['book_count']} books across "
                 f"{len(document['grade_counts'])} grades; "
