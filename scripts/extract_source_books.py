@@ -24,8 +24,9 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path, PurePosixPath
+from threading import Thread
 from typing import Any, Iterable
 
 WORKER_COUNT = 19
@@ -315,6 +316,57 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _run_extractor(command: list[str], worker_id: int, source_path: str) -> None:
+    """Run ScholarET's C++ extractor while reporting live per-book heartbeats."""
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    output_tail: deque[str] = deque(maxlen=80)
+
+    def drain_output() -> None:
+        if process.stdout is None:
+            return
+        for line in process.stdout:
+            output_tail.append(line.rstrip("\r\n"))
+
+    reader = Thread(
+        target=drain_output,
+        name=f"scholaret-worker-{worker_id:02d}-output",
+        daemon=True,
+    )
+    reader.start()
+    started = time.monotonic()
+    while process.poll() is None:
+        try:
+            process.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            elapsed_minutes = int((time.monotonic() - started) // 60)
+            print(
+                f"Worker {worker_id:02d}: ScholarET is still extracting "
+                f"{source_path} ({elapsed_minutes} min elapsed)",
+                flush=True,
+            )
+    reader.join()
+    if process.stdout is not None:
+        process.stdout.close()
+
+    last_output = "\n".join(output_tail)[-4000:]
+    if process.returncode != 0:
+        detail = f"\nLast extractor output:\n{last_output}" if last_output else ""
+        raise RuntimeError(
+            f"ScholarET extraction failed for {source_path} "
+            f"with exit code {process.returncode}.{detail}"
+        )
+    if last_output:
+        print(f"Worker {worker_id:02d}: ScholarET output for {source_path}:\n{last_output}", flush=True)
+
+
 def run_worker(
     inventory_path: Path | str,
     worker_id: int,
@@ -352,8 +404,10 @@ def run_worker(
             pdf_path = source_dir.joinpath(*source_relative.parts)
             book_dir = package_dir / f"Grade {book['grade']}" / str(book["book_name"])
             print(
-                f"Worker {worker_id:02d}: fetching Grade {book['grade']} / "
-                f"{book['book_name']} ({book['source_bytes']} bytes)"
+                f"Worker {worker_id:02d}: downloading and verifying Grade "
+                f"{book['grade']} / {book['book_name']} "
+                f"({book['source_bytes']} bytes)",
+                flush=True,
             )
             download_source_pdf(book, inventory["source_revision"], pdf_path)
             book_dir.mkdir(parents=True, exist_ok=True)
@@ -369,22 +423,12 @@ def run_worker(
                 "--threads",
                 "0",
             ]
-            result = subprocess.run(
-                command,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+            print(
+                f"Worker {worker_id:02d}: launching the compiled ScholarET C++ "
+                f"extractor for {book['source_path']}",
+                flush=True,
             )
-            if result.stdout:
-                print(result.stdout[-4000:], end="" if result.stdout.endswith("\n") else "\n")
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"ScholarET extraction failed for {book['source_path']} "
-                    f"with exit code {result.returncode}"
-                )
+            _run_extractor(command, worker_id, str(book["source_path"]))
 
             markdown_path = book_dir / markdown_name
             if not markdown_path.is_file() or markdown_path.stat().st_size == 0:

@@ -2,9 +2,21 @@ name: Extract Grade 1-12 Books (19 Workers)
 
 on:
   workflow_dispatch:
+    inputs:
+      worker_ids:
+        description: 'JSON string array of worker IDs, e.g. ["11","13","17"]'
+        type: string
+        required: false
+        default: '["00","01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","17","18"]'
+      reuse_run_id:
+        description: Optional prior run ID whose successful worker ZIPs should be reused during verification
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   test:
@@ -92,31 +104,12 @@ jobs:
     name: Worker ${{ matrix.worker_id }}
     needs: build-extractor
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       max-parallel: 19
       matrix:
-        worker_id:
-          - "00"
-          - "01"
-          - "02"
-          - "03"
-          - "04"
-          - "05"
-          - "06"
-          - "07"
-          - "08"
-          - "09"
-          - "10"
-          - "11"
-          - "12"
-          - "13"
-          - "14"
-          - "15"
-          - "16"
-          - "17"
-          - "18"
+        worker_id: ${{ fromJSON(inputs.worker_ids) }}
     steps:
       - name: Checkout ScholarET
         uses: actions/checkout@v4
@@ -139,10 +132,11 @@ jobs:
             exit 1
           fi
 
-      - name: Extract this worker's grade-book shard
+      - name: Run ScholarET C++ extractor for this worker's shard
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/runtime/lib
           PYTHONUTF8: "1"
+          PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail
           python3 scripts/extract_source_books.py worker \
@@ -165,7 +159,7 @@ jobs:
     needs: [test, build-extractor, extract]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - name: Stop if a prerequisite job failed
         if: ${{ always() && (needs.test.result != 'success' || needs.build-extractor.result != 'success' || needs.extract.result != 'success') }}
@@ -177,6 +171,17 @@ jobs:
       - name: Checkout ScholarET
         uses: actions/checkout@v4
 
+      - name: Download prior worker ZIPs for a selective retry
+        if: ${{ inputs.reuse_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scholaret-grade-worker-*
+          path: worker-zips
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.reuse_run_id }}
+
       - name: Download worker ZIP artifacts for verification
         uses: actions/download-artifact@v4
         with:
@@ -185,6 +190,9 @@ jobs:
           merge-multiple: true
 
       - name: Verify all 19 ZIPs and publish run summary
+        env:
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           python3 scripts/extract_source_books.py validate \
@@ -192,3 +200,7 @@ jobs:
             --archive-dir worker-zips \
             --summary-file worker-summary.md
           cat worker-summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "$REUSE_RUN_ID" ]]; then
+            printf '\nReused existing worker ZIP artifacts from [run %s](https://github.com/%s/actions/runs/%s).\n' \
+              "$REUSE_RUN_ID" "$REPOSITORY" "$REUSE_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          fi

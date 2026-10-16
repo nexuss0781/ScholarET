@@ -50,6 +50,14 @@ largest-processing-time-first balancing by each PDF's LFS byte size; ties are
 resolved by source path and then worker ID. Each worker downloads only its own
 books and verifies each download before invoking ScholarET.
 
+The default `worker_ids` input runs all 19 workers. For a selective retry, pass
+a JSON string array of missing IDs (for example `[`"`11`"`,`"`13`"`,`"`17`"`]`)
+and set `reuse_run_id` to a prior run that still has its successful worker ZIPs.
+The verification job combines those prior artifacts with the new worker ZIPs
+and validates the full 19-archive set without re-extracting completed workers.
+Worker jobs have a 360-minute cap; logs show each book before the compiled
+ScholarET extractor starts and emit a heartbeat while extraction continues.
+
 Each worker produces one archive, for exactly 19 ZIPs in a successful run. The
 archive contains the extractor's Markdown and image assets in this structure:
 
