@@ -79,5 +79,16 @@ inventory is uploaded separately as `scholaret-grade-book-inventory`. A final
 verification job checks all 19 archives, their assigned Markdown files, and
 worker manifests, then writes a complete per-worker report to the run summary.
 
+## Verify existing artifacts without re-extracting
+
+If an extraction run uploaded all 19 worker ZIPs but its final verification job
+could not start, run **Verify Grade Book Worker Artifacts**. Supply the completed
+extraction run ID and that run's exact `head_sha`; the verifier checks out that
+commit, downloads only the existing ZIP artifacts, and validates all manifests,
+grade-organized Markdown files, hashes, and asset counts. It does not rebuild
+ScholarET or rerun PDF extraction. The artifacts must still be within their
+14-day retention period, and the verifier runner needs temporary disk space for
+the ZIP set.
+
 No model, training dataset, optimizer, aggregation, or model-training workflow
 is invoked.

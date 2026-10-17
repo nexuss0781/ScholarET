@@ -1,0 +1,72 @@
+name: Verify Grade Book Worker Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Completed extraction workflow run ID containing all 19 worker ZIP artifacts
+        type: string
+        required: true
+      source_sha:
+        description: Full 40-character ScholarET commit SHA used by the extraction workflow
+        type: string
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    name: Verify existing 19 worker ZIPs
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Validate run ID and source commit inputs
+        env:
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'run_id must be a positive numeric workflow run ID.' >&2
+            exit 1
+          fi
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'source_sha must be a full lowercase 40-character commit SHA.' >&2
+            exit 1
+          fi
+
+      - name: Checkout the exact extraction commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+
+      - name: Show available runner storage
+        run: df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+
+      - name: Download the existing worker ZIP artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scholaret-grade-worker-*
+          path: worker-zips
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Validate all 19 archives and publish the report
+        env:
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          PYTHONUTF8: "1"
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -euo pipefail
+          python3 scripts/extract_source_books.py validate \
+            --inventory data/source_book_inventory.json \
+            --archive-dir worker-zips \
+            --summary-file worker-summary.md
+          cat worker-summary.md >> "$GITHUB_STEP_SUMMARY"
+          printf '\nValidated artifacts downloaded from [run %s](https://github.com/%s/actions/runs/%s).\n' \
+            "$SOURCE_RUN_ID" "$REPOSITORY" "$SOURCE_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
