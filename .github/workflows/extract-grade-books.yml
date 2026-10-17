@@ -205,3 +205,13 @@ jobs:
             printf '\nReused existing worker ZIP artifacts from [run %s](https://github.com/%s/actions/runs/%s).\n' \
               "$REUSE_RUN_ID" "$REPOSITORY" "$REUSE_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  publish-huggingface:
+    name: Publish verified books to Hugging Face
+    needs: verify
+    if: ${{ needs.verify.result == 'success' && inputs.reuse_run_id == '' }}
+    uses: ./.github/workflows/publish-grade-books.yml
+    with:
+      run_id: ${{ github.run_id }}
+    secrets:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}

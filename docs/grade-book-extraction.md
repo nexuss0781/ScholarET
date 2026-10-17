@@ -92,3 +92,33 @@ the ZIP set.
 
 No model, training dataset, optimizer, aggregation, or model-training workflow
 is invoked.
+
+## Publish directly to Hugging Face
+
+The public dataset is [Nexuss0781/Ethiopian-Curriculum-Books](https://huggingface.co/datasets/Nexuss0781/Ethiopian-Curriculum-Books).
+The repository Actions secret `HF_TOKEN` must contain a Hugging Face write token
+for that account. The publishing job uses the built-in read-only `GITHUB_TOKEN`
+to download worker artifacts; no personal GitHub token is needed at runtime.
+
+Full extraction runs now call **Publish Ethiopian Curriculum Books to Hugging
+Face** after the existing verification job succeeds. The publisher downloads the
+worker artifacts inside Actions, validates the complete inventory and archives,
+and publishes the extracted files—not the ZIPs. Markdown and figures retain
+their grade/subject paths and original bytes. A dataset card and provenance
+metadata accompany the books. No new license is assigned to the source books.
+
+To publish a completed extraction without repeating its C++ extraction, manually
+run **Publish Ethiopian Curriculum Books to Hugging Face**, supplying its run ID.
+For the initial publication, use `38950708216`. Its failed final verifier is not
+treated as proof of corrupt books: the publisher independently validates all 19
+archives before uploading. The source inventory is retrieved from the exact
+extraction commit, rather than silently using a newer inventory.
+
+The runner frees temporary disk space and can remove downloaded worker ZIPs
+after validation and staging. Large uploads are resumable; publication is only
+reported successful after remote file verification. A failed upload may leave a
+partial public dataset; rerun the publisher to resume. Until the Actions job
+succeeds, an empty repository or partial tree is not a completed publication.
+GitHub runner/account restrictions must be resolved before a job can execute.
+Selective extraction retries that reuse another run do not auto-publish; the
+standalone publisher currently requires one run containing all 19 worker ZIPs.
