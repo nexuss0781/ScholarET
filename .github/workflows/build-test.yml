@@ -71,11 +71,6 @@ jobs:
       - name: Make extractor executable
         run: chmod +x build/extract
 
-      - name: Install runtime deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfreetype6 libjpeg16 libopenjp2-7 libpng16-16 libtiff6 curl file
-
       - name: Download one book
         run: |
           mkdir -p data
