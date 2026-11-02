@@ -33,11 +33,18 @@ jobs:
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j$(nproc)
 
-      - name: Upload extractor binary
+      - name: Copy libmupdf.so next to extractor
+        run: |
+          cp /usr/local/lib/libmupdf.so build/ 2>/dev/null || true
+          ls -la build/
+
+      - name: Upload extractor binary + libmupdf.so
         uses: actions/upload-artifact@v4
         with:
           name: extractor-binary
-          path: build/extract
+          path: |
+            build/extract
+            build/libmupdf.so
 
   extract:
     needs: build
@@ -79,7 +86,7 @@ jobs:
 
       - name: Extract one book into its own folder
         env:
-          LD_LIBRARY_PATH: /usr/local/lib
+          LD_LIBRARY_PATH: build/:$LD_LIBRARY_PATH
         run: |
           outdir="out_test/${{ matrix.book }}"
           mkdir -p "$outdir"
