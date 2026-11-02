@@ -1,0 +1,15 @@
+# Grade 12 textbooks to extract. One URL per line.
+# Lines starting with # are ignored.
+# Source: https://github.com/ethcocoders/Digital-Library/tree/main/Source/System/Grade%2012
+
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Agriculture.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Amharic.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Biology.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Chemistry.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Economics.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/English.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Geography.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/History.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Information%20Technology.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Mathematics.pdf
+https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/Physics.pdf
