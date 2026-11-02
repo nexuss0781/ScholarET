@@ -3,11 +3,9 @@ name: Build and Test
 on: [push, pull_request]
 
 jobs:
-  build-test:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    permissions:
-      contents: write
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +25,7 @@ jobs:
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
-      - name: Build
+      - name: Build extractor
         env:
           PKG_CONFIG_PATH: /usr/local/lib/pkgconfig
           LD_LIBRARY_PATH: /usr/local/lib
@@ -35,57 +33,93 @@ jobs:
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j$(nproc)
 
-      - name: Download grade 12 books
+      - name: Upload extractor binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: extractor-binary
+          path: build/extract
+
+  extract:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        book: [
+          "Agriculture",
+          "Amharic",
+          "Biology",
+          "Chemistry",
+          "Economics",
+          "English",
+          "Geography",
+          "History",
+          "Information Technology",
+          "Mathematics",
+          "Physics"
+        ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download extractor binary
+        uses: actions/download-artifact@v4
+        with:
+          name: extractor-binary
+          path: build/
+
+      - name: Make extractor executable
+        run: chmod +x build/extract
+
+      - name: Install runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfreetype6 libjpeg16 libopenjp2-7 libpng16-16 libtiff6 curl file
+
+      - name: Download one book
         run: |
           mkdir -p data
-          while read -r url; do
-            [ -z "$url" ] && continue
-            [[ "$url" == \#* ]] && continue
-            filename=$(basename "$url")
-            echo "downloading $filename"
-            curl -L -o "data/$filename" "$url"
-          done < script/grade12_books.txt
-          echo "--- downloaded ---"
-          ls -la data/
+          curl -L -o "data/${{ matrix.book }}.pdf" \
+            "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/${{ matrix.book }}.pdf"
 
-      - name: Extract all books
+      - name: Extract one book into its own folder
         env:
           LD_LIBRARY_PATH: /usr/local/lib
         run: |
-          set -o pipefail
-          mkdir -p out_test
-          while read -r url; do
-            [ -z "$url" ] && continue
-            [[ "$url" == \#* ]] && continue
-            filename=$(basename "$url")
-            name="${filename%.pdf}"
-            outdir="out_test/$name"
-            echo "=== Extracting $filename ==="
-            ./build/extract --in "data/$filename" --out "$outdir" --threads 0 2>&1 | tee "extract-$name.log"
-            echo "---HEAD $name---"
-            head -40 "$outdir/book.md"
-            echo "---STATS $name---"
-            echo "md bytes: $(wc -c < "$outdir/book.md")"
-            echo "png files: $(find "$outdir/assets" -name '*.png' 2>/dev/null | wc -l)"
-            echo "empty pngs: $(find "$outdir/assets" -name '*.png' -size 0 2>/dev/null | wc -l)"
-          done < script/grade12_books.txt
-          test -d out_test
+          outdir="out_test/${{ matrix.book }}"
+          mkdir -p "$outdir"
+          echo "=== Extracting ${{ matrix.book }} ==="
+          ./build/extract --in "data/${{ matrix.book }}.pdf" --out "$outdir" --threads 0 2>&1 | tee "extract-${{ matrix.book }}.log"
+          echo "---HEAD---"
+          head -40 "$outdir/book.md"
+          echo "---STATS---"
+          echo "md bytes: $(wc -c < "$outdir/book.md")"
+          echo "png files: $(find "$outdir/assets" -name '*.png' 2>/dev/null | wc -l)"
+          echo "empty pngs: $(find "$outdir/assets" -name '*.png' -size 0 2>/dev/null | wc -l)"
 
-      - name: Package all outputs
-        if: always()
-        run: |
-          cd out_test
-          zip -r ../scholar-extract-sample.zip .
-
-      - name: Upload artifact
-        if: always()
+      - name: Upload per-book output
         uses: actions/upload-artifact@v4
         with:
-          name: scholar-extract-sample
-          path: scholar-extract-sample.zip
+          name: book-${{ matrix.book }}
+          path: |
+            out_test/${{ matrix.book }}/book.md
+            out_test/${{ matrix.book }}/assets/
 
-      - name: Publish to Hugging Face
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  publish:
+    needs: extract
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all per-book outputs
+        uses: actions/download-artifact@v4
+        with:
+          path: out_test
+          merge-multiple: true
+
+      - name: Publish all to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -107,18 +141,36 @@ jobs:
           print("Published all books to https://huggingface.co/datasets/" + repo_id)
           PY
 
-      - name: Check LaTeX quality
-        if: always()
+  audit:
+    needs: publish
+    runs-on: ubuntu-latest
+    if: always()
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all per-book outputs
+        uses: actions/download-artifact@v4
+        with:
+          path: out_test
+          merge-multiple: true
+
+      - name: Audit each book.md separately
         run: |
-          echo "---DIAG---"
-          for log in extract-*.log; do
-            echo "=== $log ==="
-            grep 'SCHOLARET-DIAG' "$log" || true
+          mkdir -p audit-reports
+          for dir in out_test/*/; do
+            base=$(basename "$dir")
+            md="$dir/book.md"
+            if [ -f "$md" ]; then
+              echo "=== auditing $base ==="
+              python3 script/audit_output.py "$md" --sample-lines 8 | tee "audit-reports/$base.txt"
+            fi
           done
-          echo "---PER BOOK STATS---"
-          for md in out_test/*/book.md; do
-            name=$(basename "$(dirname "$md")")
-            replacement=$(grep -o $'\xef\xbf\xbd' "$md" | wc -l)
-            display_math=$(grep -c '^\$\$' "$md" || true)
-            echo "$name: replacement_chars=$replacement display_math_blocks=$((display_math / 2))"
-          done
+          cat audit-reports/*.txt > audit.txt 2>/dev/null || true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report
+          path: audit.txt
+          if-no-files-found: warn
