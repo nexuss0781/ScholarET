@@ -54,17 +54,17 @@ jobs:
       fail-fast: false
       matrix:
         book: [
-          "Agriculture",
-          "Amharic",
-          "Biology",
-          "Chemistry",
-          "Economics",
-          "English",
-          "Geography",
-          "History",
-          "Information Technology",
-          "Mathematics",
-          "Physics"
+          {name: "Agriculture", file: "Agriculture.pdf"},
+          {name: "Amharic", file: "Amharic.pdf"},
+          {name: "Biology", file: "Biology.pdf"},
+          {name: "Chemistry", file: "Chemistry.pdf"},
+          {name: "Economics", file: "Economics.pdf"},
+          {name: "English", file: "English.pdf"},
+          {name: "Geography", file: "Geography.pdf"},
+          {name: "History", file: "History.pdf"},
+          {name: "Information Technology", file: "Information%20Technology.pdf"},
+          {name: "Mathematics", file: "Mathematics.pdf"},
+          {name: "Physics", file: "Physics.pdf"}
         ]
     steps:
       - uses: actions/checkout@v4
@@ -81,17 +81,17 @@ jobs:
       - name: Download one book
         run: |
           mkdir -p data
-          curl -L -o "data/${{ matrix.book }}.pdf" \
-            "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/${{ matrix.book }}.pdf"
+          curl -L -o "data/${{ matrix.book.name }}.pdf" \
+            "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/${{ matrix.book.file }}"
 
       - name: Extract one book into its own folder
         env:
           LD_LIBRARY_PATH: build/:$LD_LIBRARY_PATH
         run: |
-          outdir="out_test/${{ matrix.book }}"
+          outdir="out_test/${{ matrix.book.name }}"
           mkdir -p "$outdir"
-          echo "=== Extracting ${{ matrix.book }} ==="
-          ./build/extract --in "data/${{ matrix.book }}.pdf" --out "$outdir" --threads 0 2>&1 | tee "extract-${{ matrix.book }}.log"
+          echo "=== Extracting ${{ matrix.book.name }} ==="
+          ./build/extract --in "data/${{ matrix.book.name }}.pdf" --out "$outdir" --threads 0 2>&1 | tee "extract-${{ matrix.book.name }}.log"
           echo "---HEAD---"
           head -40 "$outdir/book.md"
           echo "---STATS---"
@@ -102,10 +102,10 @@ jobs:
       - name: Upload per-book output
         uses: actions/upload-artifact@v4
         with:
-          name: book-${{ matrix.book }}
+          name: book-${{ matrix.book.name }}
           path: |
-            out_test/${{ matrix.book }}/book.md
-            out_test/${{ matrix.book }}/assets/
+            out_test/${{ matrix.book.name }}/book.md
+            out_test/${{ matrix.book.name }}/assets/
 
   publish:
     needs: extract
