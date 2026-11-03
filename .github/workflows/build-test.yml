@@ -109,13 +109,20 @@ jobs:
             cat "extract-${{ matrix.book.name }}.log" 2>/dev/null || true
           fi
 
+      - name: Stage per-book output for artifact
+        if: always()
+        run: |
+          mkdir -p artifact_staging/${{ matrix.book.name }}
+          cp -r out_test/${{ matrix.book.name }}/* artifact_staging/${{ matrix.book.name }}/
+          find artifact_staging/${{ matrix.book.name }} -type f | sort
+
       - name: Upload per-book output
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: book-${{ matrix.book.name }}
-          path: out_test/${{ matrix.book.name }}/
+          path: artifact_staging/${{ matrix.book.name }}/
           if-no-files-found: warn
 
   publish:
