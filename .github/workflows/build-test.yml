@@ -138,7 +138,7 @@ jobs:
       - name: Download all per-book outputs
         uses: actions/download-artifact@v4
         with:
-          path: .
+          path: out_test
           merge-multiple: true
 
       - name: Publish all to Hugging Face
@@ -174,7 +174,7 @@ jobs:
       - name: Download all per-book outputs
         uses: actions/download-artifact@v4
         with:
-          path: .
+          path: out_test
           merge-multiple: true
 
       - name: Audit each book.md separately
