@@ -105,35 +105,35 @@ jobs:
       - name: Download one book
         run: |
           mkdir -p data
-          curl -L --retry 3 --retry-delay 5 -o "data/${{ matrix.book.file }}" \
-            "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/${{ matrix.book.file }}"
+          curl -L --retry 3 --retry-delay 5 -o "data/${{ matrix.file }}" \
+            "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/${{ matrix.file }}"
 
       - name: Extract text (C++ extractor, images disabled)
         env:
           LD_LIBRARY_PATH: build/:$LD_LIBRARY_PATH
         run: |
-          outdir="out_test/${{ matrix.book.slug }}"
+          outdir="out_test/${{ matrix.slug }}"
           mkdir -p "$outdir"
-          echo "=== Extracting text for ${{ matrix.book.name }} ==="
+          echo "=== Extracting text for ${{ matrix.book }} ==="
           set +e
-          ./build/extract --in "data/${{ matrix.book.file }}" --out "$outdir" --no-images --threads 1 2>&1 | tee "extract-${{ matrix.book.slug }}.log"
+          ./build/extract --in "data/${{ matrix.file }}" --out "$outdir" --no-images --threads 1 2>&1 | tee "extract-${{ matrix.slug }}.log"
           extract_exit=$?
           set -e
           echo "Extractor exit code: $extract_exit"
           if [ -f "$outdir/book.md" ]; then
             echo "md bytes: $(wc -c < "$outdir/book.md")"
           else
-            echo "WARNING: book.md not produced for ${{ matrix.book.name }}"
-            cat "extract-${{ matrix.book.slug }}.log" 2>/dev/null || true
+            echo "WARNING: book.md not produced for ${{ matrix.book }}"
+            cat "extract-${{ matrix.slug }}.log" 2>/dev/null || true
           fi
 
       - name: Extract embedded figures (PyMuPDF) and wire into book.md
         run: |
           pip install pymupdf --quiet
-          outdir="out_test/${{ matrix.book.slug }}"
-          echo "=== Extracting figures for ${{ matrix.book.name }} ==="
+          outdir="out_test/${{ matrix.slug }}"
+          echo "=== Extracting figures for ${{ matrix.book }} ==="
           python3 script/extract_figures.py \
-            --pdf "data/${{ matrix.book.file }}" \
+            --pdf "data/${{ matrix.file }}" \
             --out "$outdir" \
             --md book.md
 
@@ -142,8 +142,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: book-${{ matrix.book.slug }}
-          path: out_test/${{ matrix.book.slug }}/
+          name: book-${{ matrix.slug }}
+          path: out_test/${{ matrix.slug }}/
           if-no-files-found: warn
 
   publish:
