@@ -89,7 +89,7 @@ jobs:
         env:
           LD_LIBRARY_PATH: build/:$LD_LIBRARY_PATH
         run: |
-          outdir="out_test/${{ matrix.book.name }}"
+          outdir="${{ matrix.book.name }}"
           mkdir -p "$outdir"
           echo "=== Extracting ${{ matrix.book.name }} ==="
           set +e
@@ -115,7 +115,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: book-${{ matrix.book.name }}
-          path: out_test/${{ matrix.book.name }}/book.md
+          path: |
+            ${{ matrix.book.name }}/book.md
           if-no-files-found: warn
 
       - name: Upload per-book assets (if any)
@@ -124,7 +125,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: assets-${{ matrix.book.name }}
-          path: out_test/${{ matrix.book.name }}/assets/*.png
+          path: ${{ matrix.book.name }}/assets/*.png
           if-no-files-found: warn
 
   publish:
