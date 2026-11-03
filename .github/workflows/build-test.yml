@@ -162,8 +162,16 @@ jobs:
         run: |
           for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics Amharic; do
             echo "=== downloading $book ==="
-            gh run download ${{ github.run_id }} --name "book-$book" --dir "out_test/$book" --clobber 2>/dev/null \
-              || echo "no artifact for $book"
+            id=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((a['id'] for a in d['artifacts'] if a['name']=='book-$book'),''))")
+            if [ -z "$id" ]; then echo "no artifact for $book"; continue; fi
+            mkdir -p "out_test/$book"
+            curl -sL -H "Authorization: Bearer $GH_TOKEN" \
+              -o "/tmp/book-$book.zip" \
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/artifacts/${id}/zip"
+            unzip -o -q "/tmp/book-$book.zip" -d "out_test/$book"
+            rm -f "/tmp/book-$book.zip"
           done
           echo "=== staged tree ==="
           find out_test -maxdepth 2 -type f | sort | head -50
@@ -206,8 +214,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics Amharic; do
-            gh run download ${{ github.run_id }} --name "book-$book" --dir "out_test/$book" --clobber 2>/dev/null \
-              || echo "no artifact for $book"
+            id=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((a['id'] for a in d['artifacts'] if a['name']=='book-$book'),''))")
+            if [ -z "$id" ]; then echo "no artifact for $book"; continue; fi
+            mkdir -p "out_test/$book"
+            curl -sL -H "Authorization: Bearer $GH_TOKEN" \
+              -o "/tmp/book-$book.zip" \
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/artifacts/${id}/zip"
+            unzip -o -q "/tmp/book-$book.zip" -d "out_test/$book"
+            rm -f "/tmp/book-$book.zip"
           done
 
       - name: Audit each book.md separately
