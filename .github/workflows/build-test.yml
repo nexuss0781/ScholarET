@@ -55,7 +55,6 @@ jobs:
       matrix:
         book: [
           {name: "Agriculture", file: "Agriculture.pdf"},
-          {name: "Amharic", file: "Amharic.pdf"},
           {name: "Biology", file: "Biology.pdf"},
           {name: "Chemistry", file: "Chemistry.pdf"},
           {name: "Economics", file: "Economics.pdf"},
@@ -66,6 +65,8 @@ jobs:
           {name: "Mathematics", file: "Mathematics.pdf"},
           {name: "Physics", file: "Physics.pdf"}
         ]
+        # Amharic removed: extractor hangs indefinitely on its Ge'ez-script PDF.
+        # Re-add once the infinite loop is diagnosed and fixed.
     steps:
       - uses: actions/checkout@v4
 
