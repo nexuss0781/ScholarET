@@ -80,6 +80,11 @@ struct Span {
 struct Line {
     std::vector<Span> spans;
     RectF bbox;
+    // Index of the MuPDF structured-text block this line came from. MuPDF has
+    // already done paragraph segmentation; keeping the index lets layout
+    // analysis preserve those boundaries instead of collapsing the whole page
+    // into a single block.
+    int block_index = 0;
     float baseline_y = 0.0f;
     float line_height = 0.0f;
     bool is_indented = false;
@@ -234,7 +239,7 @@ struct ExtractConfig {
     float para_gap_ratio = 0.85f;
     float min_block_height = 1.0f;
     float min_span_chars = 1;
-    float header_footer_margin_pct = 0.10f;
+    float header_footer_margin_pct = 0.12f;
     float caption_near_dist = 60.0f;
     float list_indent_tol = 6.0f;
     float same_line_tol = 2.5f;

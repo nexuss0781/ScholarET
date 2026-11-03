@@ -56,20 +56,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        book: [
-          {name: "Agriculture", file: "Agriculture.pdf"},
-          {name: "Biology", file: "Biology.pdf"},
-          {name: "Chemistry", file: "Chemistry.pdf"},
-          {name: "Economics", file: "Economics.pdf"},
-          {name: "English", file: "English.pdf"},
-          {name: "Geography", file: "Geography.pdf"},
-          {name: "History", file: "History.pdf"},
-          {name: "Information Technology", file: "Information%20Technology.pdf"},
-          {name: "Mathematics", file: "Mathematics.pdf"},
-          {name: "Physics", file: "Physics.pdf"}
-        ]
-        # Amharic removed: extractor hangs indefinitely on its Ge'ez-script PDF.
-        # Re-add once the infinite loop is diagnosed and fixed.
+        include:
+          - book: "Agriculture"
+            file: "Agriculture.pdf"
+            slug: "Agriculture"
+          - book: "Biology"
+            file: "Biology.pdf"
+            slug: "Biology"
+          - book: "Chemistry"
+            file: "Chemistry.pdf"
+            slug: "Chemistry"
+          - book: "Economics"
+            file: "Economics.pdf"
+            slug: "Economics"
+          - book: "English"
+            file: "English.pdf"
+            slug: "English"
+          - book: "Geography"
+            file: "Geography.pdf"
+            slug: "Geography"
+          - book: "History"
+            file: "History.pdf"
+            slug: "History"
+          - book: "Information Technology"
+            file: "Information%20Technology.pdf"
+            slug: "Information_Technology"
+          - book: "Mathematics"
+            file: "Mathematics.pdf"
+            slug: "Mathematics"
+          - book: "Physics"
+            file: "Physics.pdf"
+            slug: "Physics"
+          - book: "Amharic"
+            file: "Amharic.pdf"
+            slug: "Amharic"
     steps:
       - uses: actions/checkout@v4
 
@@ -85,56 +105,66 @@ jobs:
       - name: Download one book
         run: |
           mkdir -p data
-          curl -L -o "data/${{ matrix.book.name }}.pdf" \
+          curl -L --retry 3 --retry-delay 5 -o "data/${{ matrix.book.file }}" \
             "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%2012/${{ matrix.book.file }}"
 
-      - name: Extract one book into its own folder
+      - name: Extract text (C++ extractor, images disabled)
         env:
           LD_LIBRARY_PATH: build/:$LD_LIBRARY_PATH
         run: |
-          outdir="out_test/${{ matrix.book.name }}"
+          outdir="out_test/${{ matrix.book.slug }}"
           mkdir -p "$outdir"
-          echo "=== Extracting ${{ matrix.book.name }} ==="
+          echo "=== Extracting text for ${{ matrix.book.name }} ==="
           set +e
-          ./build/extract --in "data/${{ matrix.book.name }}.pdf" --out "$outdir" --threads 0 2>&1 | tee "extract-${{ matrix.book.name }}.log"
+          ./build/extract --in "data/${{ matrix.book.file }}" --out "$outdir" --no-images --threads 1 2>&1 | tee "extract-${{ matrix.book.slug }}.log"
           extract_exit=$?
           set -e
           echo "Extractor exit code: $extract_exit"
           if [ -f "$outdir/book.md" ]; then
-            echo "---HEAD---"
-            head -40 "$outdir/book.md"
-            echo "---STATS---"
             echo "md bytes: $(wc -c < "$outdir/book.md")"
-            echo "png files: $(find "$outdir/assets" -name '*.png' 2>/dev/null | wc -l)"
-            echo "empty pngs: $(find "$outdir/assets" -name '*.png' -size 0 2>/dev/null | wc -l)"
           else
             echo "WARNING: book.md not produced for ${{ matrix.book.name }}"
-            cat "extract-${{ matrix.book.name }}.log" 2>/dev/null || true
+            cat "extract-${{ matrix.book.slug }}.log" 2>/dev/null || true
           fi
 
-      - name: Upload per-book output
+      - name: Extract embedded figures (PyMuPDF) and wire into book.md
+        run: |
+          pip install pymupdf --quiet
+          outdir="out_test/${{ matrix.book.slug }}"
+          echo "=== Extracting figures for ${{ matrix.book.name }} ==="
+          python3 script/extract_figures.py \
+            --pdf "data/${{ matrix.book.file }}" \
+            --out "$outdir" \
+            --md book.md
+
+      - name: Upload per-book output (preserves <Book>/ folder)
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: book-${{ matrix.book.name }}
-          path: out_test/${{ matrix.book.name }}/
+          name: book-${{ matrix.book.slug }}
+          path: out_test/${{ matrix.book.slug }}/
           if-no-files-found: warn
 
   publish:
     needs: extract
     runs-on: ubuntu-latest
+    # Publish on pushes to main and on manual dispatch so the full pipeline can be
+    # validated end-to-end without waiting for a push.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all per-book outputs
+      - name: Download all per-book outputs into their own folders
         run: |
-          for book in Agriculture Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
-            gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no book artifact for $book"
-            gh run download ${{ github.run_id }} --name "assets-${book}" --dir . --clobber 2>/dev/null || echo "no assets artifact for $book"
+          for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics Amharic; do
+            echo "=== downloading $book ==="
+            gh run download ${{ github.run_id }} --name "book-$book" --dir "out_test/$book" --clobber 2>/dev/null \
+              || echo "no artifact for $book"
           done
+          echo "=== staged tree ==="
+          find out_test -maxdepth 2 -type f | sort | head -50
 
       - name: Publish all to Hugging Face
         env:
@@ -147,6 +177,9 @@ jobs:
 
           repo_id = "Nexuss0781/Ethiopian-Student-Curriculem"
           api = HfApi(token=os.environ["HF_TOKEN"])
+
+          # Wipe the stale dataset content (leaked binary, root book.md, fragments).
+          api.delete_repo(repo_id=repo_id, repo_type="dataset", missing_ok=True)
           api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, private=False)
 
           api.upload_folder(
@@ -166,11 +199,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all per-book outputs
+      - name: Download all per-book outputs into their own folders
         run: |
-          for book in Agriculture Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
-            gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no book artifact for $book"
-            gh run download ${{ github.run_id }} --name "assets-${book}" --dir . --clobber 2>/dev/null || echo "no assets artifact for $book"
+          for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics Amharic; do
+            gh run download ${{ github.run_id }} --name "book-$book" --dir "out_test/$book" --clobber 2>/dev/null \
+              || echo "no artifact for $book"
           done
 
       - name: Audit each book.md separately

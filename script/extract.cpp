@@ -828,13 +828,16 @@ void Extractor::extract_text_from_page(fz_page* page, PageResult& pr) {
     // pass B. Bail out of the merge if the two ever disagree in length.
     fz_stext_block* cidblk = cidp ? cidp->first_block : nullptr;
     fz_stext_block* blk = stp->first_block;
+    int text_block_no = 0;
     while (blk) {
         if (blk->type == FZ_STEXT_BLOCK_TEXT) {
+            const int this_block_no = text_block_no++;
             fz_stext_line* cidln = (cidblk && cidblk->type == FZ_STEXT_BLOCK_TEXT)
                                        ? cidblk->u.t.first_line : nullptr;
             fz_stext_line* ln = blk->u.t.first_line;
             while (ln) {
                 Line l;
+                l.block_index = this_block_no;
                 l.bbox = to_rectf(ln->bbox);
                 l.baseline_y = ln->first_char ? ln->first_char->origin.y : ln->bbox.y1;
                 l.line_height = ln->bbox.y1 - ln->bbox.y0;
@@ -1299,10 +1302,44 @@ std::vector<Block> Extractor::analyze_layout(const std::vector<Line>& lines, Pag
     Block cur;
     cur.type = BlockType::Paragraph;
     cur.page_num = pr.page_num;
+    int cur_block_index = -1;
+
+    auto flush = [&]() {
+        if (!cur.lines.empty()) blocks.push_back(std::move(cur));
+        cur = Block();
+        cur.type = BlockType::Paragraph;
+        cur.page_num = pr.page_num;
+        cur_block_index = -1;
+    };
+
     for (const auto& l : lines) {
-        std::string lt = join_spans_text(l.spans);
-        lt = trim_copy(lt);
+        std::string lt = trim_copy(join_spans_text(l.spans));
         if (lt.empty()) continue;
+
+        bool start_new = cur.lines.empty();
+        if (!start_new) {
+            // MuPDF already segmented paragraphs; keep those boundaries.
+            if (l.block_index != cur_block_index) start_new = true;
+        }
+        if (!start_new) {
+            const Line& prev = cur.lines.back();
+            float gap = l.bbox.y0 - prev.bbox.y1;
+            float lh = std::max(prev.line_height, l.line_height);
+            if (gap > std::max(6.0f, lh * 0.9f)) start_new = true;
+
+            // A font-size jump inside one MuPDF block is usually a heading
+            // followed by body text (or a caption); do not fuse them.
+            float prev_max = 0.0f, line_max = 0.0f;
+            for (const auto& s : prev.spans) prev_max = std::max(prev_max, s.font_size);
+            for (const auto& s : l.spans) line_max = std::max(line_max, s.font_size);
+            if (prev_max > 0.01f && line_max > 0.01f &&
+                (line_max > prev_max * 1.35f || prev_max > line_max * 1.35f)) {
+                start_new = true;
+            }
+        }
+        if (start_new && !cur.lines.empty()) flush();
+        if (cur.lines.empty()) cur_block_index = l.block_index;
+
         if (cur.lines.empty()) {
             cur.lines.push_back(l);
             cur.bbox = l.bbox;
@@ -1314,7 +1351,7 @@ std::vector<Block> Extractor::analyze_layout(const std::vector<Line>& lines, Pag
             if (l.bbox.y1 > cur.bbox.y1) cur.bbox.y1 = l.bbox.y1;
         }
     }
-    if (!cur.lines.empty()) blocks.push_back(std::move(cur));
+    flush();
     return blocks;
 }
 
@@ -1359,10 +1396,49 @@ void Extractor::detect_headers_footers(PageResult& pr, std::vector<Block>& block
 // punctuation-light string that appears on a large share of pages.
 void Extractor::drop_repeated_page_text(std::vector<Block>& blocks, size_t page_count) {
     if (blocks.empty() || page_count < 4) return;
+
+    // Running headers usually carry the page number ("2 Unit 1 ..."), so the
+    // raw lines differ from page to page. Normalising the leading/trailing
+    // number before comparing lets the repeated part be recognised while the
+    // >=page_count/4 guard still protects ordinary body sentences.
+    auto make_key = [](const std::string& raw) {
+        std::string s = to_lower_copy(trim_copy(raw));
+        size_t i = 0;
+        while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+        if (i > 0) {
+            size_t j = i;
+            while (j < s.size() &&
+                   (s[j] == ' ' || s[j] == '.' || s[j] == '-' || s[j] == '|' || s[j] == ':')) {
+                ++j;
+            }
+            if (j > i) s = s.substr(j);
+        }
+        size_t e = s.size();
+        while (e > 0 && std::isdigit(static_cast<unsigned char>(s[e - 1]))) --e;
+        if (e == 0) {
+            s.clear();
+        } else if (e < s.size() &&
+                   (s[e - 1] == ' ' || s[e - 1] == '.' || s[e - 1] == '-' || s[e - 1] == '|')) {
+            s = s.substr(0, e);
+        }
+        std::string o;
+        bool space = false;
+        for (char c : s) {
+            if (std::isspace(static_cast<unsigned char>(c))) {
+                space = true;
+            } else {
+                if (space && !o.empty()) o.push_back(' ');
+                o.push_back(c);
+                space = false;
+            }
+        }
+        return o;
+    };
+
     std::map<std::string, std::set<int>> seen;
     for (const auto& b : blocks) {
         for (const auto& l : b.lines) {
-            std::string key = to_lower_copy(trim_copy(join_spans_text(l.spans)));
+            std::string key = make_key(join_spans_text(l.spans));
             if (key.size() < 8 || key.size() > 90) continue;
             // Require it to look like furniture, not a sentence.
             int letters = 0, punct = 0;
@@ -1388,7 +1464,7 @@ void Extractor::drop_repeated_page_text(std::vector<Block>& blocks, size_t page_
         std::vector<Line> kept;
         kept.reserve(b.lines.size());
         for (auto& l : b.lines) {
-            std::string key = to_lower_copy(trim_copy(join_spans_text(l.spans)));
+            std::string key = make_key(join_spans_text(l.spans));
             if (furniture.count(key)) { ++removed; continue; }
             kept.push_back(std::move(l));
         }
@@ -1407,18 +1483,46 @@ void Extractor::classify_blocks(std::vector<Block>& blocks, const PageTextStats&
     for (auto& b : blocks) {
         b.page_num = page_num;
         if (b.lines.empty()) { b.type = BlockType::Ignore; continue; }
-        float fmax = 0.0f;
-        for (auto& l : b.lines) for (auto& s : l.spans) if (s.font_size > fmax) fmax = s.font_size;
-        b.font_size_max = fmax;
-        if (fmax >= base * 1.60f) { b.type = BlockType::Chapter; b.level = 1; }
-        else if (fmax >= base * 1.40f) { b.type = BlockType::Section; b.level = 2; }
-        else if (fmax >= base * 1.20f) { b.type = BlockType::Subsection; b.level = 3; }
-        else if (fmax >= base * 1.12f) { b.type = BlockType::Subsubsection; b.level = 4; }
+
+        // Character-weighted dominant size, not the maximum. A body paragraph
+        // with one oversized drop capital or math glyph used to look like a
+        // heading because a single span was large; a real heading has most of
+        // its characters at the larger size.
+        std::map<long, size_t> size_hist;
+        for (auto& l : b.lines) {
+            for (auto& s : l.spans) {
+                if (s.font_size > 0.01f && !s.text.empty()) {
+                    long key = static_cast<long>(std::llround(s.font_size * 10.0f));
+                    size_hist[key] += s.text.size();
+                }
+            }
+        }
+        float dominant = 0.0f;
+        size_t best_count = 0;
+        for (const auto& kv : size_hist) {
+            if (kv.second > best_count) {
+                best_count = kv.second;
+                dominant = static_cast<float>(kv.first) / 10.0f;
+            }
+        }
+        b.font_size_max = dominant;
+
+        if (dominant >= base * 1.60f) { b.type = BlockType::Chapter; b.level = 1; }
+        else if (dominant >= base * 1.40f) { b.type = BlockType::Section; b.level = 2; }
+        else if (dominant >= base * 1.20f) { b.type = BlockType::Subsection; b.level = 3; }
+        else if (dominant >= base * 1.12f) { b.type = BlockType::Subsubsection; b.level = 4; }
         else { b.type = BlockType::Paragraph; b.level = 0; }
         std::string bt = block_text(b);
+        // Keyword promotion is only a fallback for headings that happen to use
+        // body-size fonts. A running header such as "2 Unit 1 ..." (size 10 pt,
+        // same as body text) that merely contains the word "unit" must not be
+        // promoted to a chapter heading.
         if (contains_token(bt, config_.chapter_keywords)) {
-            if (b.level > 2) b.level = 1;
-            b.type = BlockType::Chapter;
+            bool looks_heading = dominant >= base * 1.15f;
+            if (looks_heading) {
+                if (b.level > 2) b.level = 1;
+                b.type = BlockType::Chapter;
+            }
         }
         if (contains_token(bt, config_.figure_keywords) && bt.size() < 120) {
             b.type = BlockType::Caption;
@@ -1480,13 +1584,13 @@ void Extractor::attach_captions(std::vector<Block>& blocks, std::vector<ImageRef
 
 std::vector<Block> Extractor::merge_document_blocks(const std::vector<PageResult>& pages) {
     std::vector<Block> all;
+    // Pages are already the document's reading order, and every page's blocks
+    // are already in MuPDF's reading order (including multi-column pages).
+    // Sorting globally by y/x used to interleave pages: the first block of a
+    // Physics book was page 134 and the second page 36. Flatten in place.
     for (const auto& pr : pages) {
         for (const auto& b : pr.blocks) all.push_back(b);
     }
-    std::sort(all.begin(), all.end(), [](const Block& a, const Block& b){
-        if (std::fabs(a.bbox.y0 - b.bbox.y0) > 4.0f) return a.bbox.y0 < b.bbox.y0;
-        return a.bbox.x0 < b.bbox.x0;
-    });
     return all;
 }
 
