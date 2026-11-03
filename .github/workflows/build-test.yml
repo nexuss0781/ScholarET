@@ -89,7 +89,7 @@ jobs:
         env:
           LD_LIBRARY_PATH: build/:$LD_LIBRARY_PATH
         run: |
-          outdir="${{ matrix.book.name }}"
+          outdir="out_test/${{ matrix.book.name }}"
           mkdir -p "$outdir"
           echo "=== Extracting ${{ matrix.book.name }} ==="
           set +e
@@ -116,7 +116,7 @@ jobs:
         with:
           name: book-${{ matrix.book.name }}
           path: |
-            ${{ matrix.book.name }}/book.md
+            out_test/${{ matrix.book.name }}/book.md
           if-no-files-found: warn
 
       - name: Upload per-book assets (if any)
@@ -125,7 +125,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: assets-${{ matrix.book.name }}
-          path: ${{ matrix.book.name }}/assets/*.png
+          path: out_test/${{ matrix.book.name }}/assets/*.png
           if-no-files-found: warn
 
   publish:
@@ -140,8 +140,8 @@ jobs:
         run: |
           mkdir -p out_test
           for book in Agriculture Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
-            gh run download ${{ github.run_id }} --name "book-${book}" --dir out_test --clobber 2>/dev/null || echo "no book artifact for $book"
-            gh run download ${{ github.run_id }} --name "assets-${book}" --dir out_test --clobber 2>/dev/null || echo "no assets artifact for $book"
+            gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no book artifact for $book"
+            gh run download ${{ github.run_id }} --name "assets-${book}" --dir . --clobber 2>/dev/null || echo "no assets artifact for $book"
           done
 
       - name: Publish all to Hugging Face
@@ -178,8 +178,8 @@ jobs:
         run: |
           mkdir -p out_test
           for book in Agriculture Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
-            gh run download ${{ github.run_id }} --name "book-${book}" --dir out_test --clobber 2>/dev/null || echo "no book artifact for $book"
-            gh run download ${{ github.run_id }} --name "assets-${book}" --dir out_test --clobber 2>/dev/null || echo "no assets artifact for $book"
+            gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no book artifact for $book"
+            gh run download ${{ github.run_id }} --name "assets-${book}" --dir . --clobber 2>/dev/null || echo "no assets artifact for $book"
           done
 
       - name: Audit each book.md separately
