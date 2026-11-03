@@ -115,9 +115,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: book-${{ matrix.book.name }}
-          path: |
-            out_test/${{ matrix.book.name }}/book.md
-            out_test/${{ matrix.book.name }}/assets/*.png
+          path: out_test/${{ matrix.book.name }}/book.md
+          if-no-files-found: warn
+
+      - name: Upload per-book assets (if any)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets-${{ matrix.book.name }}
+          path: out_test/${{ matrix.book.name }}/assets/*.png
           if-no-files-found: warn
 
   publish:
