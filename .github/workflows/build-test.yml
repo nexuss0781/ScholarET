@@ -115,9 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: book-${{ matrix.book.name }}
-          path: |
-            out_test/${{ matrix.book.name }}/book.md
-            out_test/${{ matrix.book.name }}/assets/
+          path: out_test/${{ matrix.book.name }}/
           if-no-files-found: warn
 
   publish:
