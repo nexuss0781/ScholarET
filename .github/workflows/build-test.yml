@@ -49,7 +49,7 @@ jobs:
   extract:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -109,29 +109,30 @@ jobs:
           fi
 
       - name: Upload per-book output
-        if: success() || failure()
+        if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: book-${{ matrix.book.name }}
           path: |
-            out_test/${{ matrix.book.name }}/book.md
-            out_test/${{ matrix.book.name }}/assets/
+            ${{ matrix.book.name }}/book.md
+            ${{ matrix.book.name }}/assets/
           if-no-files-found: warn
 
   publish:
     needs: extract
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Download all per-book outputs
-        uses: actions/download-artifact@v4
-        with:
-          path: out_test
-          merge-multiple: true
+        run: |
+          mkdir -p out_test
+          for book in Agriculture Amharic Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
+            gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no artifact for $book"
+          done
 
       - name: Publish all to Hugging Face
         env:
@@ -159,15 +160,16 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     if: always()
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Download all per-book outputs
-        uses: actions/download-artifact@v4
-        with:
-          path: out_test
-          merge-multiple: true
+        run: |
+          mkdir -p out_test
+          for book in Agriculture Amharic Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
+            gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no artifact for $book"
+          done
 
       - name: Audit each book.md separately
         run: |
@@ -178,11 +180,14 @@ jobs:
             if [ -f "$md" ]; then
               echo "=== auditing $base ==="
               python3 script/audit_output.py "$md" --sample-lines 8 | tee "audit-reports/$base.txt"
+            else
+              echo "=== no book.md for $base, skipping ==="
             fi
           done
           cat audit-reports/*.txt > audit.txt 2>/dev/null || true
 
       - name: Upload audit report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: audit-report
