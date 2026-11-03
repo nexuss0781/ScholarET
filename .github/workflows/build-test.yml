@@ -109,21 +109,13 @@ jobs:
             cat "extract-${{ matrix.book.name }}.log" 2>/dev/null || true
           fi
 
-      - name: Stage per-book output for artifact
-        if: always()
-        run: |
-          bn="${{ matrix.book.name }}"
-          mkdir -p "artifact_staging/$bn"
-          cp -r "out_test/$bn/"* "artifact_staging/$bn/"
-          find "artifact_staging/$bn" -type f | sort
-
       - name: Upload per-book output
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: book-${{ matrix.book.name }}
-          path: artifact_staging/${{ matrix.book.name }}/
+          path: out_test/${{ matrix.book.name }}/
           if-no-files-found: warn
 
   publish:
@@ -136,7 +128,6 @@ jobs:
 
       - name: Download all per-book outputs
         run: |
-          mkdir -p out_test
           for book in Agriculture Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
             gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no book artifact for $book"
             gh run download ${{ github.run_id }} --name "assets-${book}" --dir . --clobber 2>/dev/null || echo "no assets artifact for $book"
@@ -174,7 +165,6 @@ jobs:
 
       - name: Download all per-book outputs
         run: |
-          mkdir -p out_test
           for book in Agriculture Biology Chemistry Economics English Geography History "Information Technology" Mathematics Physics; do
             gh run download ${{ github.run_id }} --name "book-${book}" --dir . --clobber 2>/dev/null || echo "no book artifact for $book"
             gh run download ${{ github.run_id }} --name "assets-${book}" --dir . --clobber 2>/dev/null || echo "no assets artifact for $book"
