@@ -1896,7 +1896,10 @@ int main(int argc, char** argv) {
         std::cout << "MD: " << dr.output_md_path << "\n";
         std::cout << "Assets: " << dr.assets_dir << "\n";
         std::cout << "Time(ms): " << dr.elapsed_ms.count() << "\n";
-        std::cout << "OK: " << (dr.success ? "yes" : "no") << "\n";
+        std::cout << "OK: " << (dr.success ? "yes" : "no") << std::endl;
+        for (const auto& err : dr.errors) {
+            std::cerr << "ERROR: " << err << std::endl;
+        }
     }
     return dr.success ? 0 : 1;
 }

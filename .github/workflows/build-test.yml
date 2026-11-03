@@ -91,21 +91,33 @@ jobs:
           outdir="out_test/${{ matrix.book.name }}"
           mkdir -p "$outdir"
           echo "=== Extracting ${{ matrix.book.name }} ==="
+          set +e
           ./build/extract --in "data/${{ matrix.book.name }}.pdf" --out "$outdir" --threads 0 2>&1 | tee "extract-${{ matrix.book.name }}.log"
-          echo "---HEAD---"
-          head -40 "$outdir/book.md"
-          echo "---STATS---"
-          echo "md bytes: $(wc -c < "$outdir/book.md")"
-          echo "png files: $(find "$outdir/assets" -name '*.png' 2>/dev/null | wc -l)"
-          echo "empty pngs: $(find "$outdir/assets" -name '*.png' -size 0 2>/dev/null | wc -l)"
+          extract_exit=$?
+          set -e
+          echo "Extractor exit code: $extract_exit"
+          if [ -f "$outdir/book.md" ]; then
+            echo "---HEAD---"
+            head -40 "$outdir/book.md"
+            echo "---STATS---"
+            echo "md bytes: $(wc -c < "$outdir/book.md")"
+            echo "png files: $(find "$outdir/assets" -name '*.png' 2>/dev/null | wc -l)"
+            echo "empty pngs: $(find "$outdir/assets" -name '*.png' -size 0 2>/dev/null | wc -l)"
+          else
+            echo "WARNING: book.md not produced for ${{ matrix.book.name }}"
+            cat "extract-${{ matrix.book.name }}.log" 2>/dev/null || true
+          fi
 
       - name: Upload per-book output
+        if: success() || failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: book-${{ matrix.book.name }}
           path: |
             out_test/${{ matrix.book.name }}/book.md
             out_test/${{ matrix.book.name }}/assets/
+          if-no-files-found: warn
 
   publish:
     needs: extract
