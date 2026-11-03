@@ -112,9 +112,10 @@ jobs:
       - name: Stage per-book output for artifact
         if: always()
         run: |
-          mkdir -p artifact_staging/${{ matrix.book.name }}
-          cp -r out_test/${{ matrix.book.name }}/* artifact_staging/${{ matrix.book.name }}/
-          find artifact_staging/${{ matrix.book.name }} -type f | sort
+          bn="${{ matrix.book.name }}"
+          mkdir -p "artifact_staging/$bn"
+          cp -r "out_test/$bn/"* "artifact_staging/$bn/"
+          find "artifact_staging/$bn" -type f | sort
 
       - name: Upload per-book output
         if: always()
