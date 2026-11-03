@@ -157,6 +157,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download all per-book outputs into their own folders
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics Amharic; do
             echo "=== downloading $book ==="
@@ -200,6 +202,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download all per-book outputs into their own folders
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics Amharic; do
             gh run download ${{ github.run_id }} --name "book-$book" --dir "out_test/$book" --clobber 2>/dev/null \
