@@ -1218,47 +1218,74 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
         if (stp) fz_drop_stext_page(c, stp);
         return;
     }
+    std::set<fz_image*> seen_images;
+    // Default colorspaces for gray/RGB conversion when the embedded image is
+    // CMYK / indexed / multi-channel (mirrors the proven PyMuPDF fallback).
+    fz_default_colorspaces* default_cs = fz_new_default_colorspaces(c);
     for (fz_stext_block* blk = stp->first_block; blk; blk = blk->next) {
         if (blk->type != FZ_STEXT_BLOCK_IMAGE) continue;
+        fz_image* image = blk->u.i.image;
+        if (!image) continue;
+        // Decode each embedded image once per page; a figure drawn twice on the
+        // same page is placed at each occurrence but saved only once.
+        if (!seen_images.insert(image).second) continue;
+
         fz_rect ibox = blk->bbox;
         if (fz_is_empty_rect(ibox)) continue;
         if (fz_is_infinite_rect(ibox)) continue;
-        float pad = 1.0f;
-        fz_rect r;
-        r.x0 = ibox.x0 - pad; r.y0 = ibox.y0 - pad;
-        r.x1 = ibox.x1 + pad; r.y1 = ibox.y1 + pad;
-        float zoom = 150.0f / 72.0f;
-        if (config_.image_dpi_hint > 0) {
-            zoom = static_cast<float>(config_.image_dpi_hint) / 72.0f;
-        }
-        if (config_.max_image_dimension > 0) {
-            float rw = r.x1 - r.x0;
-            float rh = r.y1 - r.y0;
-            float maxd = static_cast<float>(config_.max_image_dimension);
-            if (rw > 0.0f && rh > 0.0f) {
-                float zmax = std::min(maxd / rw, maxd / rh);
-                if (zoom > zmax) zoom = zmax;
-            }
-        }
-        if (zoom <= 0.0f) zoom = 1.0f;
-        int w = static_cast<int>((r.x1 - r.x0) * zoom + 0.5f);
-        int h = static_cast<int>((r.y1 - r.y0) * zoom + 0.5f);
-        if (w < 1) w = 1;
-        if (h < 1) h = 1;
-        fz_pixmap* pm = nullptr;
+
+        // Reject drawn-tiny image instances (inline glyph tiles, spacers) BEFORE
+        // decoding: these are drawn at only a few points on the page and are not
+        // figures. This is what makes Amharic (9,719 3.8pt tiles per page) fast.
+        float dw = ibox.x1 - ibox.x0;
+        float dh = ibox.y1 - ibox.y0;
+        if (dw < 8.0f && dh < 8.0f) continue;
+
+        // Decode the embedded image object at its native resolution. We do NOT
+        // re-render a page region here (that produced thousands of tiny slivers
+        // and hung on glyph-tile pages).
+        int iw = 0, ih = 0;
+        fz_pixmap* src = nullptr;
         fz_try(c) {
-            pm = fz_new_pixmap(c, fz_device_rgb(c), w, h, nullptr, 0);
-            if (pm) {
-                fz_matrix ctm = fz_concat(fz_scale(zoom, zoom),
-                                          fz_translate(-r.x0, -r.y0));
-                fz_device* dev = fz_new_draw_device_with_bbox(c, ctm, pm, nullptr);
-                fz_run_page(c, page, dev, fz_identity, nullptr);
-                fz_drop_device(c, dev);
-            }
+            src = fz_get_pixmap_from_image(c, image, nullptr, nullptr, &iw, &ih);
         } fz_catch(c) {
-            if (pm) { fz_drop_pixmap(c, pm); pm = nullptr; }
+            src = nullptr;
         }
-        if (!pm) continue;
+        if (!src || iw <= 0 || ih <= 0) continue;
+
+        // Reject tiny spacers/glyph tiles: a real figure has substance.
+        if (iw < 24 || ih < 24 || (uint64_t)iw * ih < (uint64_t)48 * 48) {
+            fz_drop_pixmap(c, src);
+            continue;
+        }
+
+        // Colorspace fallback chain: save as-is if gray/RGB and not indexed;
+        // otherwise convert to gray, then to RGB. Never re-render.
+        fz_pixmap* pm = nullptr;
+        int comps = src->n - src->alpha;
+        fz_colorspace* cs = src->colorspace;
+        bool indexed = cs && fz_colorspace_is_indexed(c, cs);
+        if ((comps == 1 || comps == 3) && cs && !indexed) {
+            pm = src;
+        } else {
+            fz_pixmap* gray = fz_convert_pixmap(c, src, fz_default_gray(c, default_cs),
+                                                nullptr, default_cs, fz_default_color_params, 0);
+            if (gray) {
+                fz_drop_pixmap(c, src);
+                pm = gray;
+            } else {
+                fz_pixmap* rgb = fz_convert_pixmap(c, src, fz_default_rgb(c, default_cs),
+                                                   nullptr, default_cs, fz_default_color_params, 0);
+                if (rgb) {
+                    fz_drop_pixmap(c, src);
+                    pm = rgb;
+                } else {
+                    fz_drop_pixmap(c, src);
+                    continue;
+                }
+            }
+        }
+
         ImageRef ir;
         ir.page_num = pr.page_num;
         ir.index = static_cast<int>(pr.images.size());
@@ -1292,6 +1319,7 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
         }
         fz_drop_pixmap(c, pm);
     }
+    fz_drop_default_colorspaces(c, default_cs);
     fz_drop_stext_page(c, stp);
 }
 
@@ -1633,65 +1661,113 @@ void Extractor::build_outline(std::vector<Block>& blocks, DocResult& dr) {
     }
 }
 
+namespace {
+    struct PageItem {
+        bool is_figure = false;
+        float y0 = 0.0f;
+        const Block* block = nullptr;
+        const ImageRef* img = nullptr;
+    };
+}
+
 void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path& md_path) {
     std::ofstream f(md_path, std::ios::binary);
     if (!f.is_open()) return;
     f << "# " << fs::path(dr.input_path).filename().string() << "\n\n";
+
+    // Table of contents from real headings only. Skip front-matter / contents
+    // pages (they list every unit as a heading and pollute navigation).
     if (!dr.outline.empty()) {
         f << "## Table of Contents\n\n";
         for (const auto& oi : dr.outline) {
+            // Contents pages cluster many short numbered headings; skip those.
+            if (oi.title.size() < 3) continue;
+            bool is_contents_entry = false;
+            for (char c : oi.title) {
+                if (std::isdigit(static_cast<unsigned char>(c))) { is_contents_entry = true; break; }
+            }
+            if (is_contents_entry && oi.title.size() > 40) continue;
             std::string indent;
             int l = oi.level;
             if (l <= 0) l = 1;
             for (int i = 1; i < l; ++i) indent += "  ";
-            f << indent << "- [" << escape_md(oi.title) << "](#" << slugify(oi.title) << ")\n";
+            f << indent << "- [" << escape_md(oi.title) << "](#page-" << oi.page_num << ")\n";
         }
         f << "\n";
     }
-    if (!dr.all_images.empty()) {
-        f << "## Figures\n\n";
-        for (const auto& im : dr.all_images) {
-            f << "- ![" << escape_md(im.caption_hint.empty() ? im.filename : im.caption_hint) << "](" << im.rel_path_md << ")";
-            f << " _(Page " << im.page_num << ", " << im.filename << ")_\n";
-        }
-        f << "\n";
-    }
+
     f << "---\n\n";
-    for (const auto& b : dr.merged_blocks) {
-        std::string raw = block_text(b);
-        if (raw.empty()) continue;
-        // Every block, whatever path built it, passes through here. Doing the
-        // separation here rather than inside render_line_text also covers the
-        // block_text fallbacks, and block_text stays free of "$" delimiters so
-        // that TOC titles, slugs and dedup keys are unaffected.
-        std::string bt = separate_latex_commands(render_block_text(b));
-        if (trim_copy(bt).empty()) continue;
-        switch (b.type) {
-            case BlockType::Title:
-                f << "# " << bt << "\n\n"; break;
-            case BlockType::Chapter:
-                f << "\n## " << bt << "\n\n"; break;
-            case BlockType::Section:
-                f << "\n### " << bt << "\n\n"; break;
-            case BlockType::Subsection:
-                f << "\n#### " << bt << "\n\n"; break;
-            case BlockType::Subsubsection:
-                f << "\n##### " << bt << "\n\n"; break;
-            case BlockType::Caption:
-                f << "_Figure: " << bt << "_\n\n"; break;
-            case BlockType::ListItem:
-                f << "- " << bt << "\n"; break;
-            case BlockType::OrderedListItem:
-                f << "1. " << bt << "\n"; break;
-            case BlockType::Code:
-                f << "```text\n" << bt << "\n```\n\n"; break;
-            case BlockType::Quote:
-                f << "> " << bt << "\n\n"; break;
-            default:
-                if (!bt.empty() && bt.back() == '\n') f << bt;
-                else f << bt << "\n\n";
-                break;
+
+    // Render page by page, in document order, interleaving text blocks and
+    // figures by their vertical position on the page so every figure appears
+    // exactly where it sits in the book — not all dumped at the top.
+    for (const auto& pr : dr.pages) {
+        f << "## Page " << pr.page_num << "\n\n";
+
+        std::vector<PageItem> items;
+        items.reserve(pr.blocks.size() + pr.images.size());
+
+        for (const auto& b : pr.blocks) {
+            if (b.type == BlockType::Ignore || b.type == BlockType::Caption) continue;
+            std::string bt = trim_copy(separate_latex_commands(render_block_text(b)));
+            if (bt.empty()) continue;
+            PageItem it;
+            it.is_figure = false;
+            it.y0 = b.bbox.y0;
+            it.block = &b;
+            items.push_back(std::move(it));
         }
+
+        for (const auto& im : pr.images) {
+            PageItem it;
+            it.is_figure = true;
+            it.y0 = im.bbox.y0;
+            it.img = &im;
+            items.push_back(std::move(it));
+        }
+
+        std::sort(items.begin(), items.end(), [](const PageItem& a, const PageItem& b){
+            if (std::fabs(a.y0 - b.y0) > 2.0f) return a.y0 < b.y0;
+            return a.is_figure < b.is_figure;
+        });
+
+        for (const auto& it : items) {
+            if (it.is_figure) {
+                const ImageRef& im = *it.img;
+                std::string alt = im.caption_hint.empty() ? im.filename : im.caption_hint;
+                f << "![" << escape_md(alt) << "](" << im.rel_path_md << ") ";
+                f << "_(Page " << im.page_num << ", " << im.width << "x" << im.height
+                  << ", " << im.filename << ")_\n\n";
+            } else {
+                const Block& b = *it.block;
+                std::string bt = trim_copy(separate_latex_commands(render_block_text(b)));
+                if (bt.empty()) continue;
+                switch (b.type) {
+                    case BlockType::Title:
+                        f << "# " << bt << "\n\n"; break;
+                    case BlockType::Chapter:
+                        f << "\n## " << bt << " {#page-" << b.page_num << "}\n\n"; break;
+                    case BlockType::Section:
+                        f << "\n### " << bt << " {#page-" << b.page_num << "}\n\n"; break;
+                    case BlockType::Subsection:
+                        f << "\n#### " << bt << " {#page-" << b.page_num << "}\n\n"; break;
+                    case BlockType::Subsubsection:
+                        f << "\n##### " << bt << " {#page-" << b.page_num << "}\n\n"; break;
+                    case BlockType::ListItem:
+                        f << "- " << bt << "\n"; break;
+                    case BlockType::OrderedListItem:
+                        f << "1. " << bt << "\n"; break;
+                    case BlockType::Code:
+                        f << "```text\n" << bt << "\n```\n\n"; break;
+                    case BlockType::Quote:
+                        f << "> " << bt << "\n\n"; break;
+                    default:
+                        f << bt << "\n\n";
+                        break;
+                }
+            }
+        }
+        f << "\n---\n\n";
     }
     f.close();
 }
