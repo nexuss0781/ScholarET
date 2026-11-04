@@ -177,14 +177,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # One API call lists all artifacts; parse every ID at once so a
-          # transient API hiccup can't silently drop individual books.
-          artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts")
+          # Wait for artifacts to propagate, then list all IDs in one API call.
+          sleep 15
+          artifact_json=""
+          for attempt in 1 2 3; do
+            artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=100")
+            if echo "$artifact_json" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+              break
+            fi
+            echo "artifact API attempt $attempt failed, retrying..."
+            sleep 10
+          done
           for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics; do
             echo "=== downloading $book ==="
-            id=$(echo "$artifact_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((a['id'] for a in d['artifacts'] if a['name']=='book-$book'),''))")
-            if [ -z "$id" ]; then echo "no artifact for $book"; continue; fi
+            id=$(echo "$artifact_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((a['id'] for a in d.get('artifacts',[]) if a['name']=='book-$book'),''))")
+            if [ -z "$id" ]; then
+              echo "no artifact for $book via API, trying gh run download..."
+              gh run download ${{ github.run_id }} --name "book-$book" --dir "out_test/$book" --clobber 2>/dev/null \
+                || echo "no artifact for $book via gh either"
+              continue
+            fi
             mkdir -p "out_test/$book"
             curl -sL -H "Authorization: Bearer $GH_TOKEN" \
               -o "/tmp/book-$book.zip" \
@@ -232,12 +245,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts")
+          sleep 15
+          artifact_json=""
+          for attempt in 1 2 3; do
+            artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=100")
+            if echo "$artifact_json" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+              break
+            fi
+            echo "artifact API attempt $attempt failed, retrying..."
+            sleep 10
+          done
           for book in Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics; do
             echo "=== downloading $book ==="
-            id=$(echo "$artifact_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((a['id'] for a in d['artifacts'] if a['name']=='book-$book'),''))")
-            if [ -z "$id" ]; then echo "no artifact for $book"; continue; fi
+            id=$(echo "$artifact_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(next((a['id'] for a in d.get('artifacts',[]) if a['name']=='book-$book'),''))")
+            if [ -z "$id" ]; then
+              echo "no artifact for $book via API, trying gh run download..."
+              gh run download ${{ github.run_id }} --name "book-$book" --dir "out_test/$book" --clobber 2>/dev/null \
+                || echo "no artifact for $book via gh either"
+              continue
+            fi
             mkdir -p "out_test/$book"
             curl -sL -H "Authorization: Bearer $GH_TOKEN" \
               -o "/tmp/book-$book.zip" \
