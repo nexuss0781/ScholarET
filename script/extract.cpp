@@ -1767,14 +1767,14 @@ void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path
 
         f << "## Page " << pr.page_num << "\n\n";
 
-        // Split items into columns so multi-column pages read column by column.
+        // Detect column split: the gap between two clusters of line centers.
         float split = 0.0f;
         bool two_col = pr.stats.has_two_columns &&
                        pr.stats.left_col_x1 > 0.0f && pr.stats.right_col_x0 > 0.0f;
         if (two_col) split = (pr.stats.left_col_x1 + pr.stats.right_col_x0) * 0.5f;
 
         struct ColItem {
-            int col = 0;        // 0 = left/full, 1 = right
+            int col = 0;        // 0 = left/full-width, 1 = right
             bool is_figure = false;
             float y0 = 0.0f;
             const Block* block = nullptr;
@@ -1782,6 +1782,8 @@ void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path
         };
         std::vector<ColItem> items;
         items.reserve(pr.blocks.size() + pr.images.size());
+
+        auto page_width = pr.page_width;
 
         for (const auto& b : pr.blocks) {
             if (b.type == BlockType::Ignore || b.type == BlockType::Caption) continue;
@@ -1803,8 +1805,17 @@ void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path
             it.y0 = b.bbox.y0;
             it.block = &b;
             if (two_col) {
+                float bw = b.bbox.x1 - b.bbox.x0;
                 float cx = (b.bbox.x0 + b.bbox.x1) * 0.5f;
-                it.col = (cx > split) ? 1 : 0;
+                // Full-width block (heading, caption, table spanning both cols):
+                // render in column 0 first, before column split.
+                if (bw > page_width * 0.55f) {
+                    it.col = 0;
+                } else if (cx > split) {
+                    it.col = 1;
+                } else {
+                    it.col = 0;
+                }
             }
             items.push_back(std::move(it));
         }
