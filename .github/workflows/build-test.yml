@@ -191,11 +191,12 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          pip install huggingface_hub --quiet
+          pip install huggingface_hub requests --quiet
           python - <<'PY'
           from huggingface_hub import HfApi
           import os
           import time
+          import requests
 
           repo_id = "Nexuss0781/Ethiopian-Student-Curriculem"
           api = HfApi(token=os.environ["HF_TOKEN"])
@@ -203,16 +204,20 @@ jobs:
           books = ["Agriculture", "Biology", "Chemistry", "Economics", "English",
                    "Geography", "History", "Information_Technology", "Mathematics", "Physics"]
 
+          headers = {}
+          if os.environ.get("HF_TOKEN"):
+              headers["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+
           # Wait for extract jobs' HF uploads to propagate, then verify each book
           for attempt in range(30):
               all_ok = True
               for book in books:
+                  url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{book}/book.md"
                   try:
-                      api.hf_hub_download(
-                          repo_id=repo_id,
-                          repo_type="dataset",
-                          filename=f"{book}/book.md",
-                      )
+                      r = requests.head(url, headers=headers, timeout=10)
+                      if r.status_code != 200:
+                          all_ok = False
+                          break
                   except Exception:
                       all_ok = False
                       break
