@@ -185,6 +185,10 @@ struct PageResult {
     float page_height = 0.0f;
     bool processed = false;
     std::string error;
+    // True when the page is a table-of-contents / index page (navigation, not
+    // lesson content). Such pages are skipped during rendering so they don't
+    // pollute the body with page-number lists.
+    bool is_contents_page = false;
 };
 
 struct DocOutlineItem {
@@ -325,6 +329,9 @@ private:
     
     std::vector<Block> analyze_layout(const std::vector<Line>& lines, PageResult& pr);
     void detect_columns(PageResult& pr);
+    // Marks pages that are tables of contents / indexes (navigation, not
+    // lesson content) so they can be skipped during rendering.
+    void detect_contents_page(PageResult& pr);
     void detect_headers_footers(PageResult& pr, std::vector<Block>& blocks);
     void drop_repeated_page_text(std::vector<Block>& blocks, size_t page_count);
     void classify_blocks(std::vector<Block>& blocks, const PageTextStats& stats, int page_num);

@@ -738,6 +738,27 @@ DocResult Extractor::process_document(const std::filesystem::path& input_path) {
     fz_drop_document(c, doc);
     dr.pages = std::move(page_results);
     dr.merged_blocks = merge_document_blocks(dr.pages);
+
+    // Drop every block that lives on a table-of-contents page: TOC pages are
+    // navigation (section -> page-number lists), not lesson content. Keeping
+    // them pollutes the body with bare page numbers and jumbled cross-column
+    // text, and bloats the outline with contents entries.
+    {
+        std::set<int> contents_pages;
+        for (const auto& pr : dr.pages) {
+            if (pr.is_contents_page) contents_pages.insert(pr.page_num);
+        }
+        if (!contents_pages.empty()) {
+            std::vector<Block> kept;
+            kept.reserve(dr.merged_blocks.size());
+            for (auto& b : dr.merged_blocks) {
+                if (contents_pages.count(b.page_num)) continue;
+                kept.push_back(std::move(b));
+            }
+            dr.merged_blocks = std::move(kept);
+        }
+    }
+
     drop_repeated_page_text(dr.merged_blocks, dr.pages.size());
     normalize_blocks(dr.merged_blocks);
     build_outline(dr.merged_blocks, dr);
@@ -760,6 +781,58 @@ DocResult Extractor::process_document(const std::filesystem::path& input_path) {
     return dr;
 }
 
+namespace {
+// A string that is nothing but digits, spaces, dots and commas is a bare page
+// number list (e.g. "1. 46 48 51"), not lesson content.
+static bool is_pure_page_number_text(const std::string& t) {
+    if (t.empty()) return false;
+    bool any_digit = false;
+    for (char c : t) {
+        if (std::isdigit(static_cast<unsigned char>(c))) {
+            any_digit = true;
+        } else if (c != ' ' && c != '.' && c != ',' && c != '-') {
+            return false;
+        }
+    }
+    return any_digit;
+}
+
+// Section numbering like "3.1" or "4.2" inside a short line is a strong
+// table-of-contents signal.
+static bool has_section_numbering(const std::string& t) {
+    for (size_t i = 1; i + 1 < t.size(); ++i) {
+        if (std::isdigit(static_cast<unsigned char>(t[i - 1])) && t[i] == '.' &&
+            std::isdigit(static_cast<unsigned char>(t[i + 1]))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A TOC entry: short line that either ends with a page number or carries
+// section numbering.
+static bool is_toc_entry_text(const std::string& t) {
+    if (t.empty() || t.size() > 200) return false;
+    if (std::isdigit(static_cast<unsigned char>(t.back()))) return true;
+    return has_section_numbering(t);
+}
+} // namespace
+
+// A page is a table-of-contents / index page when most of its blocks are
+// page-number lists or TOC entries. Such pages are navigation, not lesson
+// content, and are skipped during rendering.
+void Extractor::detect_contents_page(PageResult& pr) {
+    if (pr.blocks.size() < 6) return;
+    int toc_like = 0;
+    for (const auto& b : pr.blocks) {
+        std::string t = trim_copy(block_text(b));
+        if (is_pure_page_number_text(t) || is_toc_entry_text(t)) ++toc_like;
+    }
+    if (toc_like * 2 >= static_cast<int>(pr.blocks.size())) {
+        pr.is_contents_page = true;
+    }
+}
+
 PageResult Extractor::process_page(fz_document* doc, int page_num, fz_page* page) {
     (void)doc;
     PageResult pr;
@@ -780,6 +853,7 @@ PageResult Extractor::process_page(fz_document* doc, int page_num, fz_page* page
     classify_blocks(pr.blocks, pr.stats, page_num);
     refine_headings(pr.blocks, pr.stats);
     detect_lists(pr.blocks);
+    detect_contents_page(pr);
     attach_captions(pr.blocks, pr.images);
     pr.processed = true;
     return pr;
@@ -1661,32 +1735,16 @@ void Extractor::build_outline(std::vector<Block>& blocks, DocResult& dr) {
     }
 }
 
-namespace {
-    struct PageItem {
-        bool is_figure = false;
-        float y0 = 0.0f;
-        const Block* block = nullptr;
-        const ImageRef* img = nullptr;
-    };
-}
-
 void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path& md_path) {
     std::ofstream f(md_path, std::ios::binary);
     if (!f.is_open()) return;
     f << "# " << fs::path(dr.input_path).filename().string() << "\n\n";
 
-    // Table of contents from real headings only. Skip front-matter / contents
-    // pages (they list every unit as a heading and pollute navigation).
+    // Table of contents from real headings only (contents pages were already
+    // stripped from merged_blocks, so the outline is clean).
     if (!dr.outline.empty()) {
         f << "## Table of Contents\n\n";
         for (const auto& oi : dr.outline) {
-            // Contents pages cluster many short numbered headings; skip those.
-            if (oi.title.size() < 3) continue;
-            bool is_contents_entry = false;
-            for (char c : oi.title) {
-                if (std::isdigit(static_cast<unsigned char>(c))) { is_contents_entry = true; break; }
-            }
-            if (is_contents_entry && oi.title.size() > 40) continue;
             std::string indent;
             int l = oi.level;
             if (l <= 0) l = 1;
@@ -1698,35 +1756,74 @@ void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path
 
     f << "---\n\n";
 
-    // Render page by page, in document order, interleaving text blocks and
-    // figures by their vertical position on the page so every figure appears
-    // exactly where it sits in the book — not all dumped at the top.
+    // Render page by page, in document order. Contents pages are skipped
+    // entirely (navigation, not lesson content). On two-column pages the left
+    // column is emitted top-to-bottom before the right column, so text is not
+    // read across the gutter. Figures are interleaved with text by vertical
+    // position within each column, so every figure sits exactly where it
+    // appears in the book — not dumped at the top.
     for (const auto& pr : dr.pages) {
+        if (pr.is_contents_page) continue;
+
         f << "## Page " << pr.page_num << "\n\n";
 
-        std::vector<PageItem> items;
+        // Split items into columns so multi-column pages read column by column.
+        float split = 0.0f;
+        bool two_col = pr.stats.has_two_columns &&
+                       pr.stats.left_col_x1 > 0.0f && pr.stats.right_col_x0 > 0.0f;
+        if (two_col) split = (pr.stats.left_col_x1 + pr.stats.right_col_x0) * 0.5f;
+
+        struct ColItem {
+            int col = 0;        // 0 = left/full, 1 = right
+            bool is_figure = false;
+            float y0 = 0.0f;
+            const Block* block = nullptr;
+            const ImageRef* img = nullptr;
+        };
+        std::vector<ColItem> items;
         items.reserve(pr.blocks.size() + pr.images.size());
 
         for (const auto& b : pr.blocks) {
             if (b.type == BlockType::Ignore || b.type == BlockType::Caption) continue;
             std::string bt = trim_copy(separate_latex_commands(render_block_text(b)));
             if (bt.empty()) continue;
-            PageItem it;
+            // Drop bare page-number remnants (e.g. "63", "52 53") that survive
+            // list detection but are not real list items.
+            bool only_digits = !bt.empty();
+            for (char c : bt) {
+                if (!std::isdigit(static_cast<unsigned char>(c)) && c != ' ' &&
+                    c != '.' && c != ',') {
+                    only_digits = false;
+                    break;
+                }
+            }
+            if (only_digits) continue;
+            ColItem it;
             it.is_figure = false;
             it.y0 = b.bbox.y0;
             it.block = &b;
+            if (two_col) {
+                float cx = (b.bbox.x0 + b.bbox.x1) * 0.5f;
+                it.col = (cx > split) ? 1 : 0;
+            }
             items.push_back(std::move(it));
         }
 
         for (const auto& im : pr.images) {
-            PageItem it;
+            ColItem it;
             it.is_figure = true;
             it.y0 = im.bbox.y0;
             it.img = &im;
+            if (two_col) {
+                float cx = (im.bbox.x0 + im.bbox.x1) * 0.5f;
+                it.col = (cx > split) ? 1 : 0;
+            }
             items.push_back(std::move(it));
         }
 
-        std::sort(items.begin(), items.end(), [](const PageItem& a, const PageItem& b){
+        // Left column first (top to bottom), then right column (top to bottom).
+        std::sort(items.begin(), items.end(), [](const ColItem& a, const ColItem& b){
+            if (a.col != b.col) return a.col < b.col;
             if (std::fabs(a.y0 - b.y0) > 2.0f) return a.y0 < b.y0;
             return a.is_figure < b.is_figure;
         });
