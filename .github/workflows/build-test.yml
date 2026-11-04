@@ -208,9 +208,17 @@ jobs:
           books = ["Agriculture", "Biology", "Chemistry", "Economics", "English",
                    "Geography", "History", "Information_Technology", "Mathematics", "Physics"]
 
-          # List all files in tmp/staging area
-          all_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
-          staging_files = [f for f in all_files if f.startswith("tmp/staging/")]
+          # Wait for extract jobs' HF uploads to propagate through the API
+          all_files = []
+          for attempt in range(30):
+              all_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+              staging_files = [f for f in all_files if f.startswith("tmp/staging/")]
+              if staging_files:
+                  break
+              print(f"Waiting for staging files to appear... attempt {attempt + 1}/30")
+              import time
+              time.sleep(10)
+
           print(f"Found {len(staging_files)} files in tmp/staging area")
 
           for book in books:
