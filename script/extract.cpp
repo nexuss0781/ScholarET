@@ -290,8 +290,8 @@ inline std::string glyph_name_to_latex(const std::string& name) {
         {"radical", "\xE2\x88\x9A"}, {"radicalex", "\xE2\x88\x9A"},
         {"multiply", "\\times"}, {"asteriskmath", "\\cdot"},
         {"dotmath", "\\cdot"}, {"periodcentered", "\\cdot"},
-                {"plusminus", "\\pm"}, {"minusplus", "\\mp"},
-                        {"notequal", "\\neq"}, {"approxequal", "\\approx"},
+        {"plusminus", "\\pm"}, {"minusplus", "\\mp"},
+        {"notequal", "\\neq"}, {"approxequal", "\\approx"},
         {"approximatelyequal", "\\approx"}, {"similar", "\\sim"},
         {"congruent", "\\cong"}, {"propersimilar", "\\simeq"},
         {"lessequal", "\\leq"}, {"greaterequal", "\\geq"},
@@ -321,7 +321,130 @@ inline std::string glyph_name_to_latex(const std::string& name) {
         {"therefore", "\\therefore"}, {"because", "\\because"},
         {"circleplus", "\\oplus"}, {"circlemultiply", "\\otimes"},
         {"ellipsis", "\\ldots"},                 {"dagger", "\\dagger"}, {"daggerdbl", "\\ddagger"},
-                    };
+        // Additional math/symbol glyph names common in textbook PDFs
+        {"alpha", "\\alpha"}, {"beta", "\\beta"}, {"gamma", "\\gamma"},
+        {"delta", "\\delta"}, {"epsilon", "\\epsilon"}, {"varepsilon", "\\varepsilon"},
+        {"zeta", "\\zeta"}, {"eta", "\\eta"}, {"theta", "\\theta"},
+        {"vartheta", "\\vartheta"}, {"iota", "\\iota"}, {"kappa", "\\kappa"},
+        {"lambda", "\\lambda"}, {"mu", "\\mu"}, {"nu", "\\nu"},
+        {"xi", "\\xi"}, {"omicron", "\\omicron"}, {"pi", "\\pi"},
+        {"varpi", "\\varpi"}, {"rho", "\\rho"}, {"varrho", "\\varrho"},
+        {"sigma", "\\sigma"}, {"varsigma", "\\varsigma"}, {"tau", "\\tau"},
+        {"upsilon", "\\upsilon"}, {"phi", "\\phi"}, {"varphi", "\\varphi"},
+        {"chi", "\\chi"}, {"psi", "\\psi"}, {"omega", "\\omega"},
+        {"Gamma", "\\Gamma"}, {"Delta", "\\Delta"}, {"Theta", "\\Theta"},
+        {"Lambda", "\\Lambda"}, {"Xi", "\\Xi"}, {"Pi", "\\Pi"},
+        {"Sigma", "\\Sigma"}, {"Upsilon", "\\Upsilon"}, {"Phi", "\\Phi"},
+        {"Psi", "\\Psi"}, {"Omega", "\\Omega"},
+        {"circ", "\\circ"}, {"bullet", "\\bullet"}, {"prime", "\\prime"},
+        {"backprime", "\\prime"}, {"primeprime", "\\prime\\prime"},
+        {"diameter", "\\varnothing"}, {"perthousand", "\\permil"},
+        {"minute", "\\prime"}, {"second", "\\prime\\prime"},
+        {"caret", "\\^"}, {"underscore", "\\_"},
+        {"numbersign", "\\#"}, {"percent", "\\%"},
+        {"ampersand", "\\&"}, {"asterisk", "*"},
+        {"at", "@"}, {"copyright", "\\copyright"},
+        {"registered", "\\registered"}, {"trademark", "\\trademark"},
+        {"section", "\\S"}, {"paragraph", "\\P"},
+        {"dagger", "\\dagger"}, {"daggerdbl", "\\ddagger"},
+        {"sectionmark", "\\S"}, {"paragraphmark", "\\P"},
+        {"quotedblleft", "\\textquotedblleft"}, {"quotedblright", "\\textquotedblright"},
+        {"quoteleft", "\\textquoteleft"}, {"quoteright", "\\textquoteright"},
+        {"quotesinglbase", "\\textquotedblleft"}, {"quotesinglright", "\\textquotedblright"},
+        {"quotedblbase", "\\textquotedblleft"}, {"endash", "--"},
+        {"emdash", "---"}, {"brokenbar", "\\textbrokenbar"},
+        {"macron", "\\textmacron"}, {"overbar", "\\textmacron"},
+        {"breve", "\\u"}, {"ogonek", "\\textogonek"},
+        {"caron", "\\v"}, {"circumflex", "\\textasciicircum"},
+        {"tilde", "\\textasciitilde"}, {"grave", "\\`"},
+        {"acute", "\\'"}, {"diaeresis", "\\textdieresis"},
+        {"umlaut", "\\textdieresis"}, {"ring", "\\textreferencemark"},
+        {"cedilla", "\\c"}, {"slash", "/"}, {"backslash", "\\textbackslash"},
+        {"divide", "\\div"}, {"asteriskcentered", "\\ast"},
+        {"bulletoperator", "\\bullet"}, {"division", "\\div"},
+        {"colon", ":"}, {"semicolon", ";"},
+        {"lessthan", "<"}, {"greaterthan", ">"},
+        {"lessthanorequal", "\\leq"}, {"greaterthanorequal", "\\geq"},
+        {"notless", "\\not<"}, {"notgreater", "\\not>"},
+        {"muchless", "\\ll"}, {"muchgreater", "\\gg"},
+        {"identical", "\\equiv"}, {"notidentical", "\\not\\equiv"},
+        {"approxequal", "\\approx"}, {"notapproxequal", "\\not\\approx"},
+        {"proportional", "\\propto"},
+        {"therefore", "\\therefore"}, {"because", "\\because"},
+        {"emptyset", "\\varnothing"}, {"member", "\\in"},
+        {"notmember", "\\notin"}, {"suchthat", "\\ni"},
+        {"subset", "\\subset"}, {"notsubset", "\\not\\subset"},
+        {"supset", "\\supset"}, {"notsupset", "\\not\\supset"},
+        {"subseteq", "\\subseteq"}, {"notsubseteq", "\\not\\subseteq"},
+        {"supseteq", "\\supseteq"}, {"notsupseteq", "\\not\\supseteq"},
+        {"union", "\\cup"}, {"intersection", "\\cap"},
+        {"unionplus", "\\uplus"}, {"intersectionplus", "\\cap"},
+        {"bigcup", "\\bigcup"}, {"bigcap", "\\bigcap"},
+        {"oplus", "\\oplus"}, {"ominus", "\\ominus"},
+        {"otimes", "\\otimes"}, {"oslash", "\\oslash"},
+        {"odot", "\\odot"}, {"circledplus", "\\oplus"},
+        {"circledminus", "\\ominus"}, {"circledtimes", "\\otimes"},
+        {"sqrtn", "\\sqrt"}, {"nthroot", "\\sqrt"},
+        {"integral", "\\int"}, {"doubleintegral", "\\iint"},
+        {"tripleintegral", "\\iiint"}, {"contourintegral", "\\oint"},
+        {"sum", "\\sum"}, {"product", "\\prod"},
+        {"coproduct", "\\coprod"}, {"integralsum", "\\int"},
+        {"differential", "\\partial"}, {"partial", "\\partial"},
+        {"nabla", "\\nabla"}, {"exists", "\\exists"},
+        {"forall", "\\forall"}, {"neg", "\\neg"},
+        {"logicalnot", "\\neg"}, {"logicaland", "\\wedge"},
+        {"logicalor", "\\vee"}, {"logicalxor", "\\veebar"},
+        {"iff", "\\Leftrightarrow"}, {"implies", "\\Rightarrow"},
+        {"impliedby", "\\Leftarrow"}, {"models", "\\vDash"},
+        {"top", "\\top"}, {"bot", "\\bot"}, {"vdash", "\\vdash"},
+        {"dashv", "\\dashv"}, {"in", "\\in"}, {"notin", "\\notin"},
+        {"smallerthan", "<"}, {"largerthan", ">"},
+        {"angle", "\\angle"}, {"measuredangle", "\\measuredangle"},
+        {"sphericalangle", "\\sphericalangle"},
+        {"mid", "\\mid"}, {"parallel", "\\parallel"},
+        {"notparallel", "\\nparallel"}, {"perpendicular", "\\perp"},
+        {"angleleft", "\\langle"}, {"angleright", "\\rangle"},
+        {"leftarrow", "\\leftarrow"}, {"rightarrow", "\\rightarrow"},
+        {"uparrow", "\\uparrow"}, {"downarrow", "\\downarrow"},
+        {"leftrightarrow", "\\leftrightarrow"},
+        {"leftrightarrows", "\\leftrightarrows"},
+        {"leftarrowtail", "\\leftarrowtail"}, {"rightarrowtail", "\\rightarrowtail"},
+        {"mapsto", "\\mapsto"}, {"hookrightarrow", "\\hookrightarrow"},
+        {"hookleftarrow", "\\hookleftarrow"},
+        {"leftrightarrows", "\\leftrightarrows"},
+        {"Lsh", "\\Lsh"}, {"Rsh", "\\Rsh"},
+        {"Lsquo", "\\textquoteleft"}, {"Rsquo", "\\textquoteright"},
+        {"Ldquo", "\\textquotedblleft"}, {"Rdquo", "\\textquotedblright"},
+        {"Lozenge", "\\lozenge"}, {"blacklozenge", "\\blacklozenge"},
+        {"club", "\\clubsuit"}, {"diamond", "\\diamondsuit"},
+        {"heart", "\\heartsuit"}, {"spade", "\\spadesuit"},
+        {"male", "\\male"}, {"female", "\\female"},
+        {"aleph", "\\aleph"}, {"beth", "\\beth"}, {"gimel", "\\gimel"},
+        {"daleth", "\\daleth"},
+        {"maltese", "\\maltese"}, {"flower", "\\textflower"},
+        {"spadesuit", "\\spadesuit"}, {"heartsuit", "\\heartsuit"},
+        {"diamondsuit", "\\diamondsuit"}, {"clubsuit", "\\clubsuit"},
+        {"checkmark", "\\checkmark"}, {"cross", "\\times"},
+        {"ballotbox", "\\square"}, {"ballotboxwithcheck", "\\boxtimes"},
+        {"reciprocal", "\\frac{1}{x}}"}, {"partialdiff", "\\partial"},
+        {"therefore", "\\therefore"}, {"because", "\\because"},
+        {"ratio", ":"}, {"proportion", "::"},
+        {"colonapprox", "\\colonapprox"}, {"coloneqq", "\\coloneqq"},
+        {"doublecolon", "\\doublecolon"},
+        {"maltesecross", "\\maltese"}, {"euro", "\\euro"},
+        {"cent", "\\cent"}, {"pound", "\\pound"},
+        {"yen", "\\yen"}, {"won", "\\won"}, {"rupee", "\\rupee"},
+        {"won", "\\won"},
+        {"emptyset", "\\varnothing"}, {"varnothing", "\\varnothing"},
+        {"increment", "\\Delta"}, {"nabla", "\\nabla"},
+        {"blacktriangle", "\\blacktriangle"}, {"whitetriangle", "\\triangle"},
+        {"blacksquare", "\\blacksquare"}, {"whitesquare", "\\square"},
+        {"blackcircle", "\\bullet"}, {"whitecircle", "\\circ"},
+        {"blackdiamond", "\\blackdiamond"}, {"whitediamond", "\\diamond"},
+        {"star", "\\star"}, {"stars", "\\star"},
+        {"whiteflower", "\\textflower"}, {"blackflower", "\\textflower"},
+        {"starfilled", "\\star"}, {"staropen", "\\star"},
+        };
     for (const Entry& e : kTable) {
         if (name == e.n) return e.r;
     }
@@ -410,6 +533,19 @@ inline GlyphGuess resolve_glyph(fz_context* ctx, fz_font* font, int gid) {
         return out;
     }
     out.latex = glyph_name_to_latex(out.name);
+    if (!out.latex.empty()) return out;
+    // Fallback: CID codes 32-126 in most text fonts are ASCII. For symbol
+    // fonts, common CID ranges map to Greek, math, and other symbols.
+    if (gid >= 32 && gid <= 126) {
+        // Try direct ASCII mapping for standard text fonts
+        out.ucs = gid;
+        return out;
+    }
+    // CID range for common symbol glyphs in many textbook fonts
+    if (gid >= 160 && gid <= 255) {
+        out.ucs = gid;  // Latin-1 supplement range
+        return out;
+    }
     return out;
 }
 
@@ -1792,7 +1928,7 @@ void Extractor::build_outline(std::vector<Block>& blocks, DocResult& dr) {
             if (title.size() > 120) {
                 size_t cut = title.find(". ");
                 if (cut != std::string::npos && cut + 2 <= 120) title = title.substr(0, cut + 1);
-                else continue;
+                else title = title.substr(0, 117) + "...";  // truncate instead of dropping
             }
             DocOutlineItem oi;
             oi.title = title;

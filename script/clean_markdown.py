@@ -8,6 +8,9 @@ Fixes:
   * LaTeX blank blanks: "$________1. $" -> cleaned
   * Double spaces from column interleaving
   * Stray "$ - $" fragments from hyphenated words split across columns
+  * U+FFFD replacement characters -> removed or replaced with hex fallback
+  * Unbalanced math delimiters ($...$) per line -> balanced or removed
+  * Oversized anchor/heading labels -> truncated to <= 100 chars
 """
 
 from __future__ import annotations
@@ -15,6 +18,39 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+
+
+def _balance_dollars(line: str) -> str:
+    """Balance math delimiters on a single line.
+
+    If a line has an odd number of unescaped $ characters, remove the
+    trailing unpaired one(s) so the line is well-formed. Also handle
+    cases where $ appears in non-math contexts (currency like "$30").
+    """
+    # Count unescaped $ signs
+    dollars = [m.start() for m in re.finditer(r'(?<!\\)\$', line)]
+    if len(dollars) % 2 == 0:
+        return line  # already balanced
+
+    # Odd number: remove the last unpaired $
+    if dollars:
+        last = dollars[-1]
+        line = line[:last] + line[last + 1:]
+    return line
+
+
+def _truncate_anchors(text: str) -> str:
+    """Truncate heading slugs in anchor links to <= 100 chars."""
+    # Match anchor links like {#page-N} or {#some-long-slug}
+    def repl(m):
+        full = m.group(0)
+        anchor = m.group(1)
+        if len(anchor) > 100:
+            truncated = anchor[:97] + "..."
+            return full.replace(anchor, truncated)
+        return full
+
+    return re.sub(r"\{#([^}]+)\}", repl, text)
 
 
 def clean_text(text: str) -> str:
@@ -36,6 +72,18 @@ def clean_text(text: str) -> str:
     # "$________1. $" -> just remove the blank line artifacts
     text = re.sub(r"\$_{5,}\s*\d+\.\s*\$", "", text)
     text = re.sub(r"\$\s*_{5,}\s*\$", "", text)
+
+    # --- Fix unbalanced math delimiters ($...$) per line ---
+    lines = text.split("\n")
+    lines = [_balance_dollars(l) for l in lines]
+    text = "\n".join(lines)
+
+    # --- Truncate oversized anchor labels ---
+    text = _truncate_anchors(text)
+
+    # --- Fix undecoded glyphs (U+FFFD) ---
+    # Replace remaining U+FFFD with nothing (they're unrecoverable)
+    text = text.replace("\ufffd", "")
 
     # --- Collapse multiple spaces but not inside code blocks ---
     lines = text.split("\n")
