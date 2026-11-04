@@ -208,35 +208,40 @@ jobs:
           books = ["Agriculture", "Biology", "Chemistry", "Economics", "English",
                    "Geography", "History", "Information_Technology", "Mathematics", "Physics"]
 
+          # List all files in tmp/staging area
+          all_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+          staging_files = [f for f in all_files if f.startswith("tmp/staging/")]
+          print(f"Found {len(staging_files)} files in tmp/staging area")
+
           for book in books:
               print(f"Moving {book} from tmp/staging to root...")
-              # Copy from tmp/staging to root
-              src = f"tmp/staging/{book}"
-              dst = book
-              # Use the HF API to copy files: list then upload each
-              try:
-                  files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", subfolder=src)
-                  for f in files:
+              prefix = f"tmp/staging/{book}/"
+              book_files = [f for f in staging_files if f.startswith(prefix)]
+              count = 0
+              for f in book_files:
+                  rel = f[len(prefix):]
+                  try:
                       api.upload_file(
-                          path_or_fileobj=f"{src}/{f}",
-                          path_in_repo=f"{dst}/{f}",
+                          path_or_fileobj=f,
+                          path_in_repo=f"{book}/{rel}",
                           repo_id=repo_id,
                           repo_type="dataset",
                       )
-                  print(f"  Copied {len(files)} files from {src} to {dst}")
-              except Exception as e:
-                  print(f"  ERROR copying {src}: {e}")
+                      count += 1
+                  except Exception as e:
+                      print(f"    ERROR copying {f}: {e}")
+              print(f"  Copied {count} files from tmp/staging/{book} to {book}/")
 
           # Remove tmp/staging area
           try:
-              files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", subfolder="tmp")
-              for f in files:
+              tmp_files = [f for f in all_files if f.startswith("tmp/")]
+              for f in tmp_files:
                   api.delete_file(
-                      path_in_repo=f"tmp/{f}",
+                      path_in_repo=f,
                       repo_id=repo_id,
                       repo_type="dataset",
                   )
-              print("Cleaned up tmp/ staging area")
+              print(f"Cleaned up {len(tmp_files)} tmp/ staging files")
           except Exception as e:
               print(f"  Cleanup warning: {e}")
 
@@ -266,24 +271,30 @@ jobs:
           books = ["Agriculture", "Biology", "Chemistry", "Economics", "English",
                    "Geography", "History", "Information_Technology", "Mathematics", "Physics"]
 
+          # List all files once
+          all_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+
           os.makedirs("out_test", exist_ok=True)
           for book in books:
               book_dir = f"out_test/{book}"
               os.makedirs(book_dir, exist_ok=True)
-              try:
-                  files = api.list_repo_files(repo_id=repo_id, repo_type="dataset", subfolder=book)
-                  for f in files:
-                      if f.endswith("book.md") or f.endswith(".png"):
+              prefix = f"{book}/"
+              book_files = [f for f in all_files if f.startswith(prefix)]
+              downloaded = 0
+              for f in book_files:
+                  if f.endswith("book.md") or f.endswith(".png"):
+                      try:
                           api.hf_hub_download(
                               repo_id=repo_id,
                               repo_type="dataset",
-                              filename=f"{book}/{f}",
-                              local_dir=book_dir,
+                              filename=f,
+                              local_dir="out_test",
                               local_dir_use_symlinks=False,
                           )
-                  print(f"Downloaded {book}: {len(files)} files")
-              except Exception as e:
-                  print(f"  ERROR downloading {book}: {e}")
+                          downloaded += 1
+                      except Exception as e:
+                          print(f"  ERROR downloading {f}: {e}")
+              print(f"Downloaded {book}: {downloaded} files")
           PY
 
       - name: Audit each book.md separately
