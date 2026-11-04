@@ -189,6 +189,12 @@ struct PageResult {
     // lesson content). Such pages are skipped during rendering so they don't
     // pollute the body with page-number lists.
     bool is_contents_page = false;
+    // True when the page has almost no extractable text (image-based / scanned
+    // pages). For these pages we render the full page as a PNG so the visual
+    // content is preserved instead of producing an empty page.
+    bool is_image_based = false;
+    // Filename of the rendered full-page image (only set when is_image_based).
+    std::string full_page_image;
 };
 
 struct DocOutlineItem {
@@ -251,6 +257,12 @@ struct ExtractConfig {
     float hyphen_join_tol = 2.0f;
     unsigned int image_dpi_hint = 0;
     size_t max_image_dimension = 0;
+    // Pages with fewer text characters than this are treated as image-based /
+    // scanned. For such pages we render the full page as a PNG so the visual
+    // content is preserved instead of producing a near-empty page.
+    size_t min_text_chars_for_full_page = 200;
+    unsigned int full_page_dpi = 72;
+    bool extract_full_pages = true;
     std::vector<std::string> ignore_patterns;
     std::vector<std::string> heading_keywords;
     std::vector<std::string> figure_keywords;
@@ -326,6 +338,8 @@ private:
     
     void extract_text_from_page(fz_page* page, PageResult& pr);
     void extract_images_from_page(fz_page* page, PageResult& pr);
+    // Renders the full page as a PNG for image-based / scanned pages.
+    void render_full_page_image(fz_page* page, PageResult& pr);
     
     std::vector<Block> analyze_layout(const std::vector<Line>& lines, PageResult& pr);
     void detect_columns(PageResult& pr);

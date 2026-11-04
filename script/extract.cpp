@@ -847,6 +847,19 @@ PageResult Extractor::process_page(fz_document* doc, int page_num, fz_page* page
     if (config_.extract_images) {
         extract_images_from_page(page, pr);
     }
+    // Count extractable text characters. Pages with very little text are
+    // image-based / scanned (e.g. Biology). For those we render the full page
+    // as a PNG so the visual content is preserved.
+    size_t text_chars = 0;
+    for (const auto& l : pr.lines) {
+        for (const auto& s : l.spans) {
+            text_chars += s.text.size();
+        }
+    }
+    if (text_chars < config_.min_text_chars_for_full_page && config_.extract_full_pages) {
+        pr.is_image_based = true;
+        render_full_page_image(page, pr);
+    }
     pr.blocks = analyze_layout(pr.lines, pr);
     detect_columns(pr);
     detect_headers_footers(pr, pr.blocks);
@@ -1397,6 +1410,63 @@ void Extractor::extract_images_from_page(fz_page* page, PageResult& pr) {
     fz_drop_stext_page(c, stp);
 }
 
+// Render the full page as a PNG image for image-based / scanned pages where
+// text extraction yields almost nothing. The page is rendered at the configured
+// DPI and saved as a full-page asset so the visual content is preserved.
+void Extractor::render_full_page_image(fz_page* page, PageResult& pr) {
+    fz_context* c = ctx_.get();
+    float zoom = static_cast<float>(config_.full_page_dpi) / 72.0f;
+    fz_matrix ctm = fz_scale(zoom, zoom);
+    fz_rect page_rect = fz_bound_page(c, page);
+    int pw = static_cast<int>((page_rect.x1 - page_rect.x0) * zoom + 0.5f);
+    int ph = static_cast<int>((page_rect.y1 - page_rect.y0) * zoom + 0.5f);
+    fz_pixmap* pm = nullptr;
+    fz_try(c) {
+        pm = fz_new_pixmap(c, fz_device_rgb(c), pw, ph, nullptr, 0);
+        fz_device* dev = fz_new_draw_device(c, ctm, pm);
+        fz_run_page(c, page, dev, fz_identity, nullptr);
+        fz_drop_device(c, dev);
+    } fz_catch(c) {
+        if (pm) fz_drop_pixmap(c, pm);
+        return;
+    }
+    if (!pm) return;
+
+    ImageRef ir;
+    ir.page_num = pr.page_num;
+    ir.index = static_cast<int>(pr.images.size());
+    ir.bbox = to_rectf(fz_bound_page(c, page));
+    ir.page_bbox = pr.page_bbox;
+    ir.width = static_cast<uint32_t>(pm->w);
+    ir.height = static_cast<uint32_t>(pm->h);
+    ir.filename = "full-page-p" + std::to_string(pr.page_num) + ".png";
+    ir.rel_path_md = (fs::path(config_.assets_rel_prefix) / ir.filename).string();
+    ir.out_path = (config_.assets_dir / ir.filename).string();
+    std::string fnpng = ir.out_path;
+    if (config_.image_format == "png" || fnpng.find('.') == std::string::npos) {
+        if (fnpng.size() < 4 || fnpng.substr(fnpng.size()-4) != ".png") fnpng += ".png";
+    }
+    ir.out_path = fnpng;
+    ir.rel_path_md = (fs::path(config_.assets_rel_prefix) / fs::path(fnpng).filename()).string();
+    bool saved = false;
+    fz_try(c) {
+        fz_save_pixmap_as_png(c, pm, fnpng.c_str());
+        saved = true;
+    } fz_catch(c) {
+        std::fprintf(stderr, "extract: full-page png save failed (%s): %s\n",
+                     fs::path(fnpng).filename().string().c_str(), fz_caught_message(c));
+        std::fflush(stderr);
+    }
+    if (saved) {
+        pr.images.push_back(std::move(ir));
+        pr.full_page_image = ir.filename;
+    } else {
+        std::error_code rm_ec;
+        fs::remove(fnpng, rm_ec);
+    }
+    fz_drop_pixmap(c, pm);
+}
+
 std::vector<Block> Extractor::analyze_layout(const std::vector<Line>& lines, PageResult& pr) {
     (void)pr;
     std::vector<Block> blocks;
@@ -1766,6 +1836,12 @@ void Extractor::render_markdown(const DocResult& dr, const std::filesystem::path
         if (pr.is_contents_page) continue;
 
         f << "## Page " << pr.page_num << "\n\n";
+
+        // For image-based / scanned pages (little or no extractable text),
+        // flag it so consumers know the page content is visual-only.
+        if (pr.is_image_based) {
+            f << "_[Image-based page: content rendered as full-page image]_\n\n";
+        }
 
         // Detect column split: the gap between two clusters of line centers.
         float split = 0.0f;
@@ -2151,13 +2227,14 @@ int main(int argc, char** argv) {
         else if (a == "--no-cols") { cfg.detect_columns = false; }
         else if (a == "--no-merge") { cfg.merge_across_pages = false; }
         else if (a == "--no-hf") { cfg.drop_headers_footers = false; }
+        else if (a == "--no-full-page") { cfg.extract_full_pages = false; }
         else if (a == "--imgfmt" && i+1 < argc) { cfg.image_format = argv[++i]; }
         else if (a == "--imgpref" && i+1 < argc) { cfg.image_prefix = argv[++i]; }
         else if (a == "-v" || a == "--verbose") { cfg.verbose = true; }
         else if (a == "-q" || a == "--quiet") { cfg.quiet = true; }
         else if (a == "-h" || a == "--help") {
             std::cout << "ScholarET PDF Extractor\n";
-            std::cout << "Usage: extract --in file.pdf [--out out] [--threads 0] [--batch list.txt] [--no-images]\n";
+            std::cout << "Usage: extract --in file.pdf [--out out] [--threads 0] [--batch list.txt] [--no-images] [--no-full-page]\n";
             return 0;
         }
     }
