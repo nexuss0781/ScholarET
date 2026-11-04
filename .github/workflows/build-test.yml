@@ -181,9 +181,9 @@ jobs:
           # since GitHub Actions artifacts can lag behind job completion.
           expected_books="Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics"
           all_found=0
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 30); do
             artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=100")
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=200")
             if ! echo "$artifact_json" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
               echo "artifact API attempt $attempt failed, retrying..."
               sleep 10
@@ -203,7 +203,7 @@ jobs:
             sleep 10
           done
           if [ $all_found -eq 0 ]; then
-            echo "WARNING: Not all artifacts found after 120s, proceeding with what's available"
+            echo "WARNING: Not all artifacts found after 5 minutes, proceeding with what's available"
           fi
           artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=100")
@@ -266,9 +266,9 @@ jobs:
           # Poll artifacts API until all expected books are available.
           expected_books="Agriculture Biology Chemistry Economics English Geography History Information_Technology Mathematics Physics"
           all_found=0
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 30); do
             artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=100")
+              "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=200")
             if ! echo "$artifact_json" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
               echo "artifact API attempt $attempt failed, retrying..."
               sleep 10
@@ -288,7 +288,7 @@ jobs:
             sleep 10
           done
           if [ $all_found -eq 0 ]; then
-            echo "WARNING: Not all artifacts found after 120s, proceeding with what's available"
+            echo "WARNING: Not all artifacts found after 5 minutes, proceeding with what's available"
           fi
           artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/nexuss0781/ScholarET/actions/runs/${{ github.run_id }}/artifacts?per_page=100")
