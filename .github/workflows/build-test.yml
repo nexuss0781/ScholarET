@@ -151,7 +151,7 @@ jobs:
             python3 script/clean_markdown.py "$outdir/book.md"
           fi
 
-      - name: Upload book directly to Hugging Face (tmp/ staging area)
+      - name: Upload book directly to Hugging Face (final location)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -164,21 +164,19 @@ jobs:
           python - <<'PY'
           from huggingface_hub import HfApi
           import os
-          import sys
 
           repo_id = "Nexuss0781/Ethiopian-Student-Curriculem"
           book = "${{ matrix.book }}"
-          slug = "${{ matrix.slug }}"
           api = HfApi(token=os.environ["HF_TOKEN"])
 
-          # Upload to tmp/staging area first (avoids conflicts with published root)
+          # Upload directly to final location {book}/
           api.upload_folder(
               folder_path=os.path.abspath("out_test/${{ matrix.slug }}"),
-              path_in_repo=f"tmp/staging/{slug}",
+              path_in_repo=book,
               repo_id=repo_id,
               repo_type="dataset",
           )
-          print(f"Uploaded {slug} to tmp/staging/{slug}")
+          print(f"Uploaded {book} to {book}/ on HF")
           PY
 
   publish:
@@ -197,61 +195,34 @@ jobs:
           python - <<'PY'
           from huggingface_hub import HfApi
           import os
+          import time
 
           repo_id = "Nexuss0781/Ethiopian-Student-Curriculem"
           api = HfApi(token=os.environ["HF_TOKEN"])
 
-          # Wipe the stale dataset content completely
-          api.delete_repo(repo_id=repo_id, repo_type="dataset", missing_ok=True)
-          api.create_repo(repo_id=repo_id, repo_type="dataset", private=False)
-
           books = ["Agriculture", "Biology", "Chemistry", "Economics", "English",
                    "Geography", "History", "Information_Technology", "Mathematics", "Physics"]
 
-          # Wait for extract jobs' HF uploads to propagate through the API
-          all_files = []
+          # Wait for extract jobs' HF uploads to propagate, then verify each book
           for attempt in range(30):
-              all_files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
-              staging_files = [f for f in all_files if f.startswith("tmp/staging/")]
-              if staging_files:
-                  break
-              print(f"Waiting for staging files to appear... attempt {attempt + 1}/30")
-              import time
-              time.sleep(10)
-
-          print(f"Found {len(staging_files)} files in tmp/staging area")
-
-          for book in books:
-              print(f"Moving {book} from tmp/staging to root...")
-              prefix = f"tmp/staging/{book}/"
-              book_files = [f for f in staging_files if f.startswith(prefix)]
-              count = 0
-              for f in book_files:
-                  rel = f[len(prefix):]
+              all_ok = True
+              for book in books:
                   try:
-                      api.upload_file(
-                          path_or_fileobj=f,
-                          path_in_repo=f"{book}/{rel}",
+                      api.hf_hub_download(
                           repo_id=repo_id,
                           repo_type="dataset",
+                          filename=f"{book}/book.md",
                       )
-                      count += 1
-                  except Exception as e:
-                      print(f"    ERROR copying {f}: {e}")
-              print(f"  Copied {count} files from tmp/staging/{book} to {book}/")
-
-          # Remove tmp/staging area
-          try:
-              tmp_files = [f for f in all_files if f.startswith("tmp/")]
-              for f in tmp_files:
-                  api.delete_file(
-                      path_in_repo=f,
-                      repo_id=repo_id,
-                      repo_type="dataset",
-                  )
-              print(f"Cleaned up {len(tmp_files)} tmp/ staging files")
-          except Exception as e:
-              print(f"  Cleanup warning: {e}")
+                  except Exception:
+                      all_ok = False
+                      break
+              if all_ok:
+                  print(f"All {len(books)} books verified on HF after attempt {attempt + 1}/30")
+                  break
+              print(f"Waiting for books to propagate... attempt {attempt + 1}/30")
+              time.sleep(10)
+          else:
+              print("WARNING: Not all books verified after 5 minutes")
 
           print(f"Published all books to https://huggingface.co/datasets/{repo_id}")
           PY
