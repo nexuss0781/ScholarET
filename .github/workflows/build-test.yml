@@ -115,8 +115,8 @@ jobs:
             echo "download attempt $attempt for ${{ matrix.book }}"
             curl -L --retry 2 --retry-delay 5 -o "$out" "$url" 2>/dev/null || true
             head_magic=$(head -c 5 "$out" 2>/dev/null)
-            tail_magic=$(tail -c 5 "$out" 2>/dev/null)
-            if [ "$head_magic" = "%PDF" ] && [ "$tail_magic" = "%%EOF" ]; then
+            tail_magic=$(tail -c 12 "$out" 2>/dev/null | tr -d '\n\r')
+            if [ "$head_magic" = "%PDF" ] && echo "$tail_magic" | grep -q '%%EOF'; then
               echo "${{ matrix.book }} downloaded OK ($(wc -c < "$out") bytes)"
               ok=1
               break
