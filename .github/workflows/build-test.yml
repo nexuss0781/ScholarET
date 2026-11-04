@@ -177,8 +177,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Wait for artifacts to propagate, then list all IDs in one API call.
-          sleep 15
+          # Wait for artifacts to fully propagate from parallel extract jobs.
+          # GitHub Actions artifacts API can lag behind job completion.
+          sleep 60
           artifact_json=""
           for attempt in 1 2 3; do
             artifact_json=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
