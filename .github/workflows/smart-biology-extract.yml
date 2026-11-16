@@ -126,14 +126,7 @@ jobs:
             --out out/final/biology_grade9-12_first10_smart_canon.md \
             --report-out out/final/smart_extract_report.json
           echo "---- report summary ----"
-          python - <<'PY'
-import json
-from pathlib import Path
-r=json.loads(Path('out/final/smart_extract_report.json').read_text())
-print('pages', r['page_count'])
-for p in r['pages']:
-    print(p['grade'], p['page'], p['method'], p['quality_score'], p.get('warnings'))
-PY
+          python -c "import json; r=json.load(open('out/final/smart_extract_report.json')); print('pages', r['page_count']); [print(p['grade'], p['page'], p['method'], p['quality_score'], p.get('warnings')) for p in r['pages']]"
           echo "---- canon preview ----"
           head -n 120 out/final/biology_grade9-12_first10_smart_canon.md || true
 
