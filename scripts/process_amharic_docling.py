@@ -2,6 +2,10 @@
 """
 Download (if needed) and process an Amharic PDF with Docling, recording timing.
 
+This version generates figure/picture images and exports Markdown with inline
+embedded images (instead of <!-- image --> placeholders), and also extracts
+figure/table image files.
+
 Example:
   python3 scripts/process_amharic_docling.py \
     --source "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%203/Amharic.pdf" \
@@ -21,6 +25,7 @@ from urllib.request import urlopen
 DEFAULT_SOURCE = (
     "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%203/Amharic.pdf"
 )
+IMAGE_RESOLUTION_SCALE = 2.0
 
 
 def is_url(s: str) -> bool:
@@ -69,22 +74,55 @@ def main() -> int:
 
     # Import here so download can succeed even if docling missing (for clearer error after)
     t_import0 = time.perf_counter()
-    from docling.document_converter import DocumentConverter
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
     timings["import_s"] = round(time.perf_counter() - t_import0, 4)
 
-    print("Processing with Docling...")
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.images_scale = IMAGE_RESOLUTION_SCALE
+    pipeline_options.generate_page_images = False
+    pipeline_options.generate_picture_images = True
+
+    print("Processing with Docling (with picture image extraction)...")
     t_conv0 = time.perf_counter()
-    converter = DocumentConverter()
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+    )
     result = converter.convert(str(local_pdf))
     timings["convert_s"] = round(time.perf_counter() - t_conv0, 4)
     doc = result.document
 
     t_exp0 = time.perf_counter()
     md_path = out_dir / "output.md"
+    md_refs_path = out_dir / "output-with-image-refs.md"
     json_path = out_dir / "output.json"
-    md_path.write_text(doc.export_to_markdown(), encoding="utf-8")
+    figures_dir = out_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
+    # Inline embedded images in markdown (no <!-- image --> placeholders)
+    doc.save_as_markdown(md_path, image_mode=ImageRefMode.EMBEDDED)
+    # Referenced-image markdown + extracted figure/table image files
+    doc.save_as_markdown(md_refs_path, image_mode=ImageRefMode.REFERENCED)
     json_path.write_text(json.dumps(doc.export_to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    pic_count = 0
+    table_count = 0
+    for element, _level in doc.iterate_items():
+        if isinstance(element, PictureItem):
+            pic_count += 1
+            img = element.get_image(doc)
+            if img is not None:
+                img.save(figures_dir / f"picture-{pic_count}.png")
+        elif isinstance(element, TableItem):
+            table_count += 1
+            img = element.get_image(doc)
+            if img is not None:
+                img.save(figures_dir / f"table-{table_count}.png")
     timings["export_s"] = round(time.perf_counter() - t_exp0, 4)
+    timings["picture_items"] = pic_count
+    timings["table_items"] = table_count
 
     try:
         result.input.release()
@@ -96,12 +134,19 @@ def main() -> int:
     timings["local_pdf"] = str(local_pdf)
     timings["pdf_bytes"] = local_pdf.stat().st_size
     timings["markdown_bytes"] = md_path.stat().st_size
+    timings["markdown_refs_bytes"] = md_refs_path.stat().st_size
     timings["json_bytes"] = json_path.stat().st_size
+    timings["image_resolution_scale"] = IMAGE_RESOLUTION_SCALE
 
     report = {
         "status": "ok",
         "timings_seconds": timings,
-        "outputs": {"markdown": str(md_path), "json": str(json_path)},
+        "outputs": {
+            "markdown_embedded": str(md_path),
+            "markdown_referenced": str(md_refs_path),
+            "json": str(json_path),
+            "figures_dir": str(figures_dir),
+        },
     }
     report_path = out_dir / "report.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -112,10 +157,13 @@ def main() -> int:
     print(f"Import:        {timings['import_s']} s")
     print(f"Download:      {timings['download_s']} s")
     print(f"Convert:       {timings['convert_s']} s")
-    print(f"Export:        {timings['export_s']} s")
+    print(f"Export+figs:   {timings['export_s']} s")
     print(f"Total:         {timings['total_s']} s")
+    print(f"Pictures:      {pic_count}, Tables: {table_count}")
     print(f"Output (md):   {md_path} ({timings['markdown_bytes']} bytes)")
+    print(f"Output (refs): {md_refs_path} ({timings['markdown_refs_bytes']} bytes)")
     print(f"Output (json): {json_path} ({timings['json_bytes']} bytes)")
+    print(f"Figures dir:   {figures_dir}")
     print(f"Report:        {report_path}")
     return 0
 
