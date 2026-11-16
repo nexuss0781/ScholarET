@@ -20,6 +20,14 @@ REPO_API_BASE = "https://api.github.com/repos/ethcocoders/Digital-Library/conten
 RAW_BASE = "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System"
 GRADES = ["9", "10", "11", "12"]
 
+# Known Grade 9-12 Biology textbook links (from Digital-Library tree)
+KNOWN_BIOLOGY_URLS = {
+    "9": f"{RAW_BASE}/Grade%209/Biology.pdf",
+    "10": f"{RAW_BASE}/Grade%2010/Biology.pdf",
+    "11": f"{RAW_BASE}/Grade%2011/Biology.pdf",
+    "12": f"{RAW_BASE}/Grade%2012/Biology.pdf",
+}
+
 
 def http_get_json(url: str):
     req = urllib.request.Request(url, headers={"User-Agent": "biology-canon-extractor"})
@@ -28,6 +36,8 @@ def http_get_json(url: str):
 
 
 def find_biology_url(grade: str) -> str:
+    if grade in KNOWN_BIOLOGY_URLS:
+        return KNOWN_BIOLOGY_URLS[grade]
     items = http_get_json(f"{REPO_API_BASE}/Grade%20{grade}?ref=main")
     for it in items:
         if it.get("type") == "file" and it.get("name", "").lower() == "biology.pdf":
