@@ -46,16 +46,23 @@ def find_biology_url(grade: str) -> str:
     raise RuntimeError(f"Biology.pdf not found for Grade {grade}")
 
 
-def extract_one(args: tuple[str, str, str, int]) -> dict:
-    grade, url, out_dir_s, max_pages = args
+def extract_one(args: tuple[str, str, str, str, int, bool]) -> dict:
+    grade, url, out_dir_s, download_dir_s, max_pages, keep_inputs = args
     out_dir = Path(out_dir_s)
+    download_dir = Path(download_dir_s)
     out_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = out_dir / f"grade{grade}.pdf"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = download_dir / f"grade{grade}.pdf"
     md_path = out_dir / f"grade{grade}_first{max_pages}.md"
 
     t0 = time.perf_counter()
-    urllib.request.urlretrieve(url, pdf_path)
-    dl_s = time.perf_counter() - t0
+    if pdf_path.exists() and pdf_path.stat().st_size > 0:
+        dl_s = 0.0
+        cached = True
+    else:
+        urllib.request.urlretrieve(url, pdf_path)
+        dl_s = time.perf_counter() - t0
+        cached = False
 
     import pymupdf  # imported in worker
 
@@ -82,29 +89,42 @@ def extract_one(args: tuple[str, str, str, int]) -> dict:
     md_path.write_text("\n".join(parts), encoding="utf-8")
     ex_s = time.perf_counter() - t1
 
+    pdf_size = pdf_path.stat().st_size
+    if not keep_inputs:
+        try:
+            pdf_path.unlink()
+        except Exception:
+            pass
+
     return {
         "grade": grade,
         "url": url,
         "pdf_path": str(pdf_path),
-        "pdf_bytes": pdf_path.stat().st_size,
+        "pdf_bytes": pdf_size,
         "md_path": str(md_path),
         "md_bytes": md_path.stat().st_size,
         "total_pages": total_pages,
         "extracted_pages": n,
         "download_s": round(dl_s, 4),
         "extract_s": round(ex_s, 4),
+        "cached": cached,
+        "input_kept": keep_inputs,
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Extract first N pages of Grade 9-12 Biology books into one canon.")
-    ap.add_argument("--out-dir", default="out/biology_canon", help="Output directory")
+    ap.add_argument("--out-dir", default="out/biology_canon", help="Output directory for processed results")
+    ap.add_argument("--download-dir", default=None, help="Directory for downloaded PDFs (default: out-dir)")
     ap.add_argument("--pages", type=int, default=10, help="Number of pages to extract per book")
     ap.add_argument("--workers", type=int, default=4, help="Parallel extraction jobs")
+    ap.add_argument("--keep-inputs", action="store_true", help="Keep downloaded/input PDFs after extraction")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
+    download_dir = Path(args.download_dir) if args.download_dir else out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+    download_dir.mkdir(parents=True, exist_ok=True)
 
     t_total0 = time.perf_counter()
 
@@ -116,7 +136,8 @@ def main() -> int:
         print(f"  Grade {g}: {url}")
 
     print(f"\nStarting parallel extraction: {len(GRADES)} books, first {args.pages} pages, {args.workers} workers...")
-    jobs = [(g, links[g], str(out_dir), args.pages) for g in GRADES]
+    print(f"Output dir: {out_dir} | Download dir: {download_dir} | Keep inputs: {args.keep_inputs}")
+    jobs = [(g, links[g], str(out_dir), str(download_dir), args.pages, args.keep_inputs) for g in GRADES]
     results = []
     t_jobs0 = time.perf_counter()
     with ProcessPoolExecutor(max_workers=args.workers) as ex:
@@ -126,8 +147,9 @@ def main() -> int:
             try:
                 res = fut.result()
                 results.append(res)
+                cache_note = " (cached)" if res.get("cached") else ""
                 print(f"[done] Grade {res['grade']}: {res['pdf_bytes']} bytes, pages {res['extracted_pages']}/{res['total_pages']}, "
-                      f"dl {res['download_s']}s, extract {res['extract_s']}s -> {res['md_path']}")
+                      f"dl {res['download_s']}s{cache_note}, extract {res['extract_s']}s -> {res['md_path']}")
             except Exception as e:
                 print(f"[error] Grade {grade}: {e}")
                 raise
@@ -149,6 +171,14 @@ def main() -> int:
         canon_parts.append(md_text.rstrip())
         canon_parts.append("\n---\n")
     canon_path.write_text("\n".join(canon_parts).rstrip() + "\n", encoding="utf-8")
+
+    # Keep only the single processed canon output by default
+    if not args.keep_inputs:
+        for r in results:
+            try:
+                Path(r["md_path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
 
     total_s = round(time.perf_counter() - t_total0, 4)
     report = {

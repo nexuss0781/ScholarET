@@ -23,6 +23,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+
+      - name: Cache source PDFs
+        uses: actions/cache@v4
+        with:
+          path: .cache/biology_pdfs
+          key: biology-pdfs-v1-${{ hashFiles('scripts/extract_biology_canon.py') }}
 
       - name: Install lightweight PDF extractor
         run: |
@@ -34,12 +41,14 @@ jobs:
           PAGES: ${{ inputs.pages || '10' }}
         run: |
           set -euo pipefail
+          mkdir -p .cache/biology_pdfs out/biology_canon
           python scripts/extract_biology_canon.py \
             --out-dir out/biology_canon \
+            --download-dir .cache/biology_pdfs \
             --pages "$PAGES" \
-            --workers 4 | tee run.log
+            --workers 4
 
-      - name: Show report
+      - name: Show report and canon preview
         if: always()
         run: |
           echo "---- report.json ----"
@@ -47,12 +56,12 @@ jobs:
           echo "---- canon preview ----"
           head -n 120 out/biology_canon/biology_grade9-12_first10_canon.md || true
 
-      - name: Upload canon and report
+      - name: Upload processed canon (result only)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: biology-grade9-12-canon
           path: |
-            out/biology_canon/**
-            run.log
+            out/biology_canon/biology_grade9-12_first10_canon.md
+            out/biology_canon/report.json
           if-no-files-found: warn
