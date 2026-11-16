@@ -1,0 +1,55 @@
+name: Process Amharic PDF with Docling
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "PDF URL or path (default: Grade 3 Amharic from Digital-Library)"
+        required: false
+        default: "https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%203/Amharic.pdf"
+  push:
+    paths:
+      - "scripts/process_amharic_docling.py"
+      - ".github/workflows/process-amharic-docling.yml"
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Docling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install docling
+
+      - name: Run processing script (timed)
+        env:
+          SOURCE: ${{ inputs.source || 'https://github.com/ethcocoders/Digital-Library/raw/main/Source/System/Grade%203/Amharic.pdf' }}
+        run: |
+          set -euo pipefail
+          python scripts/process_amharic_docling.py \
+            --source "$SOURCE" \
+            --output-dir out/amharic_docling | tee run.log
+
+      - name: Show report
+        if: always()
+        run: |
+          echo "---- report.json ----"
+          cat out/amharic_docling/report.json || true
+
+      - name: Upload outputs and timing report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amharic-docling-output
+          path: |
+            out/amharic_docling/**
+            run.log
+          if-no-files-found: warn
